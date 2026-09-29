@@ -1,0 +1,150 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# GATE DE QUALIDADE do prompt `causa-raiz`.
+#
+# Este e o gate de verdade: roda o prompt contra o pacote de artefatos do incidente e
+# pontua a saida com a rubrica de quatro critérios, aplicada por juiz LLM.
+#
+# Por que juiz e nao assert deterministico: a saida deste item e analise em prosa. Duas
+# analises podem usar palavras completamente diferentes e as duas estarem certas, ou usar
+# as mesmas palavras e uma estar errada. `contains` nao distingue "o cache caiu porque o
+# heap saturou" de "o cache caiu e isso saturou o heap", e a segunda esta invertida.
+#
+# Rodar da raiz do repositorio:
+#   npx promptfoo eval -c devops/causa-raiz/promptfooconfig.yaml --no-cache
+#
+# O juiz deste gate foi calibrado contra pontuacao humana. O harness de calibracao esta
+# em `calibracao/`, e ele reprovou dois dos tres modelos testados. Trocar o juiz aqui sem
+# rodar a calibracao de novo invalida o gate: a nota passa a significar outra coisa.
+
+description: Gate de qualidade de causa-raiz por rubrica de 4 criterios com juiz LLM
+
+evaluateOptions:
+  # Sequencial. Cada caso gera 1 chamada de geracao mais 4 de julgamento, e limite por
+  # minuto do provedor nao distingue as duas.
+  maxConcurrency: 1
+
+prompts:
+  # Mesmo carregador das suites do Checkpoint 08: le o `prompt.md` real e descarta o
+  # frontmatter. Ler o arquivo real e o que faz o gate barrar regressao de verdade —
+  # alterar o prompt muda o que este teste mede.
+  - id: file://prompt.js
+    label: causa-raiz
+
+providers:
+  # UM provider, e a diferenca em relacao as suites do Checkpoint 08 e deliberada.
+  #
+  # La o objetivo era justamente comparar fornecedores, porque divergencia entre eles
+  # indica prompt fragil. Aqui o objetivo e outro: decidir se a analise tem qualidade
+  # suficiente para entrar. Cada provider a mais multiplica por 5 o numero de chamadas
+  # (1 geracao + 4 julgamentos) e, num gate que roda a cada alteracao, isso vira custo
+  # recorrente sem responder pergunta nova.
+  #
+  # A cobertura multi-provider deste item fica para o Checkpoint 10, que decide quando
+  # vale rodar a matriz inteira e quando vale rodar so o necessario.
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          # Ligado, e ao contrario das suites do Checkpoint 08 isso e correto aqui: a
+          # tarefa e correlacionar tres artefatos heterogeneos, estabelecer direcao de
+          # causalidade por ordem temporal e fazer aritmetica de horario. Depende de
+          # cadeia longa, e este item nao tem limite de latencia porque nao roda em
+          # caminho quente: roda durante investigacao de incidente.
+          thinkingBudget: 4096
+
+defaultTest:
+  options:
+    # Juiz declarado, mesmo modelo e mesma configuracao usados na calibracao. Se os dois
+    # divergirem, a nota do gate deixa de ter a garantia que a calibracao produziu.
+    provider:
+      id: google:gemini-3.5-flash
+      config:
+        temperature: 0
+        generationConfig:
+          thinkingConfig:
+            thinkingBudget: 2048
+
+    rubricPrompt: file://criterios/instrucao-do-juiz.txt
+
+  # CORTE: total >= 6 E nenhum critério zerado.
+  #
+  # NAO existe `threshold` de teste aqui, e a ausencia e o resultado de um bug que este
+  # arquivo teve. A primeira versao usava `threshold: 0.75`, na conta de que a media dos
+  # quatro asserts de peso igual corresponde a 6 de 8. Duas coisas estavam erradas:
+  #
+  # 1. O assert de `cost` entrava na media. Medido: uma execucao com rubrica 7/8 reprovou
+  #    com score agregado 0.70, porque o custo falhou e virou 0 na media. Custo derrubando
+  #    nota de qualidade e conflacao de duas coisas diferentes.
+  #
+  # 2. Pior: no promptfoo 0.123.1, `threshold` de teste SOBRESCREVE a reprovacao dos
+  #    asserts individuais — `pass = !this.failedReason` e, logo depois,
+  #    `if (threshold) pass = score >= threshold`. Com o threshold ligado, a regra
+  #    "nenhum critério zerado" ficava morta: 2+2+2+0 soma 6, da media 0.75 e passaria.
+  #
+  # E o corte do enunciado nao e expressavel como media, porque 6 com um critério zerado
+  # e 6 sem nenhum zerado tem exatamente a mesma media. Sao dois sinais independentes.
+  #
+  # Divisao final de responsabilidade:
+  #   - `threshold: 0.5` em cada assert de rubrica reprova o caso quando aquele critério
+  #     zera (0 pontos = score 0.0). Cumpre a condicao "nenhum critério zerado".
+  #   - `cost` reprova por conta propria.
+  #   - `aplicar-corte.js` le a saida da eval, soma os quatro critérios e aplica
+  #     "total >= 6 E nenhum zero", saindo com codigo 1 quando reprova. E ele o gate.
+  #
+  # Alternativa considerada e rejeitada: `assert-set` com threshold proprio para isolar a
+  # media da rubrica do assert de custo. Resolve a conflacao (1) e nao resolve (2), porque
+  # o threshold do set sobrescreve a reprovacao dos filhos pela mesma logica.
+
+  assert:
+    # Os quatro critérios vem de `criterios/`, os mesmos arquivos lidos pelo harness de
+    # calibracao. Fonte unica de proposito: a rubrica que calibrou o juiz precisa ser,
+    # byte a byte, a rubrica que o gate aplica.
+    - type: llm-rubric
+      metric: c1-causa-raiz
+      threshold: 0.5
+      value: file://criterios/c1-causa-raiz.txt
+
+    - type: llm-rubric
+      metric: c2-correlacao-vs-causa
+      threshold: 0.5
+      value: file://criterios/c2-correlacao-vs-causa.txt
+
+    - type: llm-rubric
+      metric: c3-acao-proporcional
+      threshold: 0.5
+      value: file://criterios/c3-acao-proporcional.txt
+
+    - type: llm-rubric
+      metric: c4-honestidade-epistemica
+      threshold: 0.5
+      value: file://criterios/c4-honestidade-epistemica.txt
+
+    # Nenhum assert de latencia aqui, e a ausencia e decidida.
+    #
+    # As tres suites do Checkpoint 08 tem limite de 5s porque sao itens de plantao, lidos
+    # com incidente aberto. Este roda durante investigacao, quando alguem ja separou os
+    # artefatos e vai ler a analise com calma. Medir latencia aqui produziria reprovacao
+    # que nao corresponde a nenhum requisito real.
+    #
+    # Ha um limite de custo, porque esse existe: cada execucao do gate paga 1 geracao
+    # (com raciocinio estendido) mais 4 julgamentos (idem). E o item mais caro do
+    # catalogo por execucao, e o Checkpoint 10 vai rodar isso a cada alteracao.
+    #
+    # O primeiro valor que escrevi aqui foi 0.08, antes de medir, e ele reprovou o
+    # baseline na segunda execucao (US$0,0811) — o mesmo erro que a suite de
+    # networkpolicy-sentinel cometeu no Checkpoint 08. O numero abaixo vem das quatro
+    # execucoes registradas no Checkpoint 09.
+    - type: cost
+      threshold: 0.15
+
+tests:
+  # Os tres artefatos ficam em arquivo, e nao embutidos no YAML. Sao o insumo real do
+  # Checkpoint 03, preservados byte a byte: a calibracao do juiz foi feita contra saidas
+  # geradas por este pacote, e reescrever os artefatos invalidaria a referencia humana.
+  - description: Cerebro 2026-05-13 — reindexacao estagnada saturando o heap
+    vars:
+      config: file://casos/cerebro-2026-05-13/config.txt
+      metricas: file://casos/cerebro-2026-05-13/metricas.txt
+      logs: file://casos/cerebro-2026-05-13/logs.txt
