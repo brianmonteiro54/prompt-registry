@@ -7,22 +7,27 @@
 # A entrada nao vem de modelo: vem de dois arquivos com saidas ja registradas no
 # Checkpoint 03, que tem nota humana atribuida antes de existir juiz automatizado.
 # Rodar a rubrica contra um modelo de verdade misturaria duas variacoes diferentes
-# ("o modelo escreveu pior" e "o juiz pontuou diferente") e o resultado nao permitiria
+# ("o modelo escreveu pior" e "o juiz pontuou diferente"), e o resultado nao permitiria
 # concluir nada sobre nenhuma das duas.
+#
+# A rubrica NAO e escrita aqui. Os quatro criterios e a instrucao do juiz vivem em
+# `../criterios/`, e sao os MESMOS arquivos usados pelo gate de verdade em
+# `../promptfooconfig.yaml`. Se a rubrica morasse nos dois configs, calibrar um juiz
+# contra um texto e usar outro em producao seria questao de tempo — e o Checkpoint 08
+# ja produziu um caso desses, com o prompt e a suite divergindo em silencio.
 #
 # Rodar da raiz do repositorio:
 #   npx promptfoo eval -c devops/causa-raiz/calibracao/promptfooconfig.yaml --no-cache \
 #     -o /tmp/calibracao.json
 #   node devops/causa-raiz/calibracao/calibrar.js /tmp/calibracao.json
 #
-# Para comparar juizes sem editar arquivo, o promptfoo aceita sobrescrever na linha de
-# comando:  --grader openai:gpt-4o
+# Para comparar juizes sem editar arquivo:  --grader openai:gpt-4o
 
 description: Calibracao do juiz da rubrica de causa-raiz contra pontuacao humana
 
 evaluateOptions:
-  # Sequencial porque o juiz e chamado 4 vezes por caso e os limites por minuto do
-  # provedor se aplicam a chamada de julgamento igual a qualquer outra.
+  # Sequencial porque o juiz e chamado 4 vezes por caso, e limite por minuto do provedor
+  # se aplica a chamada de julgamento igual a qualquer outra.
   maxConcurrency: 1
 
 prompts:
@@ -41,12 +46,12 @@ defaultTest:
     #
     # Sem `provider` explicito, o promptfoo 0.123.1 calcula
     # `shouldPreferRemote = ... || !grading.provider`, o que abre caminho para a
-    # avaliacao ser feita pelo servico remoto da ferramenta. O insumo deste item e
-    # log e metrica de producao: mandar a saida para endpoint de terceiro nao e
-    # decisao que um arquivo de teste deve tomar em silencio.
+    # avaliacao ser feita pelo servico remoto da ferramenta. O insumo deste item e log e
+    # metrica de producao: mandar a saida para endpoint de terceiro nao e decisao que um
+    # arquivo de teste deve tomar em silencio.
     #
     # Modelo escolhido: `gemini-3.5-flash` com raciocinio ligado. Escolhido por medicao
-    # neste harness, e nao por inferencia — tres candidatos foram rodados contra a mesma
+    # neste harness, e nao por inferencia — tres candidatos rodaram contra a mesma
     # referencia humana:
     #
     #   gemini-3.5-flash  8 de 8 notas iguais a humana, reproduz as duas discriminacoes
@@ -62,168 +67,56 @@ defaultTest:
     # julgamento e nao carrega informacao nenhuma. Ele reprovaria as duas analises,
     # inclusive a que o humano deu 8 de 8.
     #
-    # Custa mais caro e demora o dobro do gpt-4o (18.860 tokens contra 12.487, 32s
-    # contra 15s, cerca de US$0,076 contra US$0,039 para julgar duas analises). O gasto
-    # se justifica porque este item roda durante investigacao de incidente, e nao em
-    # caminho quente, e porque juiz que nao distingue analise boa de analise mediana
-    # transforma o gate em enfeite.
+    # Custa mais caro e demora o dobro do gpt-4o (18.860 tokens contra 12.487, 32s contra
+    # 15s, cerca de US$0,076 contra US$0,039 para julgar duas analises). O gasto se
+    # justifica porque este item roda durante investigacao de incidente, e nao em caminho
+    # quente, e porque juiz que nao distingue analise boa de analise mediana transforma o
+    # gate em enfeite.
     provider:
       id: google:gemini-3.5-flash
       config:
         temperature: 0
         generationConfig:
           thinkingConfig:
-            # Aqui o raciocinio FICA LIGADO, ao contrario das outras suites. Nao existe
-            # limite de latencia nesta suite, e julgar honestidade epistemica exige
-            # comparar afirmacao contra evidencia disponivel — e cadeia, nao lookup.
+            # Aqui o raciocinio FICA LIGADO, ao contrario das suites do Checkpoint 08.
+            # Nao existe limite de latencia nesta suite, e julgar honestidade epistemica
+            # exige comparar afirmacao contra evidencia disponivel — e cadeia, nao lookup.
             thinkingBudget: 2048
 
-    # A escala da rubrica e 0, 1 ou 2 por critério. O promptfoo trabalha com score
-    # continuo de 0 a 1, entao a conversao fica declarada aqui, uma vez, em vez de
-    # repetida em cada assert: 0 pontos -> 0.0, 1 ponto -> 0.5, 2 pontos -> 1.0.
-    #
-    # A instrucao pede nota DISCRETA. Sem isso o juiz devolve 0.7 e 0.85, numeros que
-    # nao correspondem a nenhum nivel da rubrica e que tornam a comparacao com a nota
-    # humana impossivel de interpretar.
-    rubricPrompt: |
-      Você avalia a análise de causa-raiz de um incidente de produção contra UM critério
-      de uma rubrica. Você não reescreve a análise e não opina sobre estilo.
-
-      A escala do critério tem exatamente três níveis, e você escolhe um deles:
-        2 pontos -> responda score 1.0
-        1 ponto  -> responda score 0.5
-        0 pontos -> responda score 0.0
-
-      Não use nenhum outro valor de score. Não interpole. Se você hesitar entre dois
-      níveis, escolha o menor e explique a hesitação no campo reason.
-
-      O campo pass é false apenas quando score é 0.0. Um critério com 1 ponto cumpre em
-      parte e não reprova isoladamente: o corte da rubrica é aplicado sobre o total.
-
-      No campo reason, cite o trecho da análise que sustenta a nota. Não invente trecho.
-      Se a nota for 1 ou 0, diga exatamente o que falta para o nível acima.
-
-      Responda apenas com um objeto JSON: {"reason": string, "pass": boolean, "score": number}
-
-      <Analise>
-      {{ output }}
-      </Analise>
-
-      <Criterio>
-      {{ rubric }}
-      </Criterio>
+    # A escala da rubrica e 0, 1 ou 2 por critério; o promptfoo trabalha com score
+    # continuo de 0 a 1. A conversao e a exigencia de nota DISCRETA estao na instrucao,
+    # que e compartilhada com o gate.
+    rubricPrompt: file://../criterios/instrucao-do-juiz.txt
 
   assert:
-    # Os quatro critérios, na ordem da rubrica. O texto de cada um nomeia a verdade de
-    # referência do incidente — o que é PROIBIDO no `prompt.md` e obrigatório aqui.
-    # A separação está justificada em `devops/causa-raiz/rubrica.md`.
-
-    # --- Critério 1 — Causa-raiz correta ---
     - type: llm-rubric
       metric: c1-causa-raiz
       threshold: 0.5
-      value: |
-        CRITERIO 1 — CAUSA-RAIZ CORRETA.
+      value: file://../criterios/c1-causa-raiz.txt
 
-        2 pontos (score 1.0): identifica o job de reindexação que não terminou como
-        origem do incidente, E a cadeia causal vai de job estagnado -> heap da JVM
-        esgotado -> circuit breaker acionado -> cache de busca expulso -> busca lenta.
-        Faz a aritmética temporal de forma explícita: compara o horário de término que a
-        config previa com o horário observado nos artefatos e quantifica o atraso.
-
-        1 ponto (score 0.5): chega ao recurso saturado correto (memória da JVM) mas não
-        amarra ao job estagnado como origem, OU inverte um elo da cadeia, OU não faz a
-        aritmética temporal.
-
-        0 pontos (score 0.0): aponta a lentidão de busca, o pico de indexação ou o
-        circuit breaker como causa. Todos são elos posteriores na cadeia; tratá-los como
-        origem levaria o plantão a agir no lugar errado.
-
-    # --- Critério 2 — Correlação × causa ---
     - type: llm-rubric
       metric: c2-correlacao-vs-causa
       threshold: 0.5
-      value: |
-        CRITERIO 2 — CORRELACAO VERSUS CAUSA.
+      value: file://../criterios/c2-correlacao-vs-causa.txt
 
-        2 pontos (score 1.0): classifica a queda do cache de busca como EFEITO e não
-        como causa. Descarta a hipótese de que um pico de leitura causou a degradação,
-        E o argumento usado para descartar é o correto: o gargalo está na fila de
-        escrita, não na de busca. Cada sinal listado recebe papel coerente com a sua
-        posição na linha do tempo.
-
-        1 ponto (score 0.5): classifica a maioria dos sinais corretamente mas erra o
-        papel de um deles, OU descarta a hipótese concorrente sem apresentar a evidência
-        que a derruba.
-
-        0 pontos (score 0.0): trata a queda do cache ou a lentidão de busca como causa,
-        OU lista sinais sem atribuir papel a eles, OU não apresenta nenhuma hipótese
-        concorrente.
-
-    # --- Critério 3 — Ação proporcional ---
     - type: llm-rubric
       metric: c3-acao-proporcional
       threshold: 0.5
-      value: |
-        CRITERIO 3 — ACAO PROPORCIONAL.
+      value: file://../criterios/c3-acao-proporcional.txt
 
-        2 pontos (score 1.0): a contenção age sobre o job estagnado (cancelar ou
-        interromper) e não sobre o sintoma. A correção de fundo nomeia qual parâmetro da
-        config muda — limite de duração do job, reagendamento ou isolamento. O risco de
-        cada ação identifica quem é afetado, OU declara explicitamente que a
-        classificação é provisória por ausência do mapa de dependências do serviço.
-
-        1 ponto (score 0.5): age sobre a causa, mas a correção de fundo é genérica e não
-        está ancorada em parâmetro da config, OU o risco declarado ignora o efeito
-        colateral da própria ação proposta.
-
-        0 pontos (score 0.0): propõe aumentar memória, adicionar nó ou reiniciar o
-        serviço como correção de fundo. Alivia o sintoma e o incidente reincide no
-        próximo agendamento do job.
-
-    # --- Critério 4 — Honestidade epistêmica ---
-    # Este é o critério que separa as duas execuções registradas, e é por isso que ele
-    # é o teste de fato do juiz. Um juiz que dê a mesma nota às duas aqui não está
-    # calibrado, está sendo generoso.
     - type: llm-rubric
       metric: c4-honestidade-epistemica
       threshold: 0.5
-      value: |
-        CRITERIO 4 — HONESTIDADE EPISTEMICA.
+      value: file://../criterios/c4-honestidade-epistemica.txt
 
-        Avalie com rigor. Este critério mede se a análise distingue o que os artefatos
-        provam do que ela supôs.
-
-        2 pontos (score 1.0): TODAS as condições a seguir:
-        (a) não qualifica nenhum comportamento como natural, normal, esperado, de rotina
-            ou sazonal apresentando isso como fato; quando faz esse tipo de leitura sem
-            ter baseline de dias anteriores, marca explicitamente como hipótese ou
-            premissa;
-        (b) o nível de confiança declarado tem motivo compatível com os dados, e não
-            declara confiança alta quando a conclusão depende de premissa não verificada;
-        (c) traz três ou mais lacunas, e uma delas é a limitação de escopo dos próprios
-            artefatos: quantas instâncias ou nós estão visíveis, que janela de tempo foi
-            coberta, quais métricas relevantes não existem no pacote recebido.
-
-        1 ponto (score 0.5): declara lacunas, mas falha em ao menos uma das condições
-        acima. Exemplos de falha que valem 1 ponto: apresenta uma suposição como fato
-        (por exemplo, chamar um aumento de tráfego de "natural" ou "diurno" sem baseline
-        nos artefatos que sustente a comparação); OU omite a limitação de escopo dos
-        artefatos; OU declara confiança ALTA quando a análise depende de premissa não
-        verificada.
-
-        0 pontos (score 0.0): não traz seção de lacunas, OU inventa valor, métrica ou
-        parâmetro que não aparece nos artefatos. Fabricar evidência zera o critério
-        independentemente da qualidade do resto da análise.
-
-# As notas humanas NAO ficam aqui. Elas vivem em `referencia-humana.json`, que e a
-# fonte unica lida por `calibrar.js`.
+# As notas humanas NAO ficam aqui. Elas vivem em `referencia-humana.json`, que e a fonte
+# unica lida por `calibrar.js`.
 #
-# Dois motivos. O primeiro e que a comparacao que qualifica um juiz e RELATIVA e cruza
-# os dois casos — ele tem que dar nota menor a execucao 1 nos critérios 3 e 4 — e um
-# assert do promptfoo so ve o proprio caso. O segundo apareceu na pratica: uma nota
-# humana foi corrigida depois de o juiz ja ter sido executado, e com a referencia num
-# arquivo separado deu para reavaliar a concordancia sem gastar chamada de API de novo.
+# Dois motivos. O primeiro e que a comparacao que qualifica um juiz e RELATIVA e cruza os
+# dois casos — ele tem que dar nota menor a execucao 1 nos critérios 3 e 4 — e um assert
+# do promptfoo so ve o proprio caso. O segundo apareceu na pratica: uma nota humana foi
+# corrigida depois de o juiz ja ter sido executado, e com a referencia num arquivo
+# separado deu para reavaliar a concordancia sem gastar chamada de API de novo.
 tests:
   - description: Execucao 1 do CP03 — referencia humana 6/8 (c3 = 1, c4 = 1)
     vars:
