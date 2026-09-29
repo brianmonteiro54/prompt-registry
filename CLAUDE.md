@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Propósito do repositório
 
-Catálogo de prompts em Markdown organizados por categoria / área de domínio. Não há código executável, build, testes ou pipeline — é um repositório documental cuja qualidade é medida pela clareza dos prompts e pela consistência da estrutura.
+Catálogo de prompts em Markdown organizados por categoria / área de domínio. A qualidade é medida pela clareza dos prompts, pela consistência da estrutura e — para os prompts que têm suíte de avaliação — pelo resultado dos testes.
+
+Não há código de aplicação neste repositório. Há, porém, **avaliação automatizada**: prompts de saída estruturada carregam um arquivo de configuração de testes ao lado do `prompt.md`, e um pipeline de CI executa essa suíte a cada alteração. Ver as seções "Estrutura obrigatória" e "Avaliação automatizada".
 
 Compõe o material dos projetos da pós-graduação em AIOps e Inteligência Artificial com Engenharia Cloud ([pos.veronez.io/pos-aiops](https://pos.veronez.io/pos-aiops/)) — decisões de escopo e convenções devem considerar esse uso didático.
 
@@ -13,8 +15,9 @@ Compõe o material dos projetos da pós-graduação em AIOps e Inteligência Art
 ```
 <categoria>/
   <nome-do-prompt>/
-    prompt.md    # o prompt em si (conteúdo que será copiado/usado)
-    README.md    # metadados e documentação do prompt
+    prompt.md              # o prompt em si (conteúdo que será copiado/usado)
+    README.md              # metadados e documentação do prompt
+    promptfooconfig.yaml   # opcional: suíte de avaliação do prompt
 ```
 
 Regras:
@@ -67,6 +70,22 @@ Regras:
 
 **Duplicação consciente**: o frontmatter é idêntico em `prompt.md` e `README.md`. Edições manuais precisam ser replicadas nos dois arquivos — prefira usar `/catalogar` para evitar divergência.
 
+## Prompts que dependem de outros prompts
+
+Dois padrões estruturais aparecem no catálogo e precisam estar declarados no `README.md` de cada prompt envolvido, porque a pasta isolada não os revela:
+
+- **Cadeia**: a saída integral de um prompt é o parâmetro de entrada do seguinte. Cada elo é um item independente do catálogo, com sua própria pasta e seu próprio versionamento, e o `README.md` declara qual prompt o antecede e qual o sucede. O elo seguinte não refaz o trabalho do anterior: trata a saída recebida como autoridade estabelecida e, quando discorda, declara a discordância em seção própria da saída.
+- **Par gerador/revisor**: um prompt produz o artefato e outro o critica sem reescrevê-lo, em ciclo de refino. O gerador aceita os apontamentos do revisor por parâmetro opcional, o que o torna o mesmo item nas duas pontas do ciclo. Recomenda-se executar o revisor em modelo diferente do gerador, ou no mínimo em sessão limpa — revisor que herda a janela de contexto de quem escreveu não questiona as restrições, opera dentro delas.
+
+## Avaliação automatizada
+
+Prompts cuja saída tem formato estruturado e verificável carregam um `promptfooconfig.yaml` na própria pasta, ao lado do `prompt.md`. O teste viaja junto com o prompt.
+
+- O config referencia o prompt por caminho relativo à raiz do repositório e declara os casos de teste com os valores de cada `input` do frontmatter.
+- Todo config inclui, além dos asserts de conteúdo, dois limites operacionais: latência máxima e custo máximo por chamada. Latência e custo são tratados como parte da qualidade, não como detalhe de execução.
+- Prompt de saída aberta — análise, decisão, plano — não é testável por comparação de string. Esses usam avaliação por julgamento (LLM como juiz) com rubrica declarada, e o corte de aprovação fica registrado no config.
+- Assert de string sobre saída em português precisa considerar normalização Unicode: rótulo com acento tem mais de uma representação byte a byte válida. Quando o formato de saída for livre, preferir rótulos sem acento; quando o formato for imposto por um padrão externo, fixar a forma normalizada no assert.
+
 ## Manutenção da documentação
 
 Sempre que um prompt ou uma categoria for **incluído ou alterado**, revisar e atualizar:
@@ -75,6 +94,7 @@ Sempre que um prompt ou uma categoria for **incluído ou alterado**, revisar e a
 2. **`README.md` da raiz** — índice geral do catálogo; atualizar a listagem de categorias e/ou prompts quando algo for adicionado, renomeado ou removido.
 3. **`README.md` da categoria** — garantir que o escopo descrito ainda contempla os prompts existentes; atualizar quando um prompt novo ampliar ou redefinir o escopo.
 4. **`README.md` do prompt** — manter objetivo, exemplo de uso e limitações alinhados ao conteúdo atual de `prompt.md`; garantir que o frontmatter esteja idêntico ao do `prompt.md`.
+5. **`promptfooconfig.yaml` do prompt**, quando existir — alterar o texto do prompt sem rodar a suíte é a forma mais comum de regressão silenciosa. Se a mudança altera o formato de saída, os asserts mudam na mesma entrega; se altera os `inputs`, os casos de teste mudam junto.
 
 A revisão da documentação faz parte da mesma entrega que a mudança do prompt — não deve ficar para depois.
 
