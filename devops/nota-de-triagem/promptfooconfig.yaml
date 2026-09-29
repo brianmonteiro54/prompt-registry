@@ -1,0 +1,156 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de avaliacao do prompt `nota-de-triagem`.
+#
+# Saida estruturada: da para testar por string, sem julgamento humano.
+# Rodar da raiz do repositorio:  npx promptfoo eval -c devops/nota-de-triagem/promptfooconfig.yaml
+#
+# O prompt e carregado por `prompt.js`, que le o `prompt.md` desta pasta e descarta o
+# frontmatter YAML. Ler o arquivo real e deliberado: alterar o prompt muda o que a suite
+# testa, que e a condicao para o pipeline barrar regressao.
+
+description: Nota de triagem padronizada a partir de alerta bruto de monitoracao
+
+# Execucao sequencial, e nao por economia de tempo: o assert de latencia so tem
+# significado quando as chamadas nao competem entre si. Medido nesta suite, com
+# concorrencia 4 o mesmo prompt que responde em ~1s passou a levar 21s por fila do
+# lado do provedor. Isso reprovaria o build por carga da API, nao por regressao do
+# prompt. A garantia fica no arquivo de teste, e nao na linha de comando, para nao
+# depender de quem executa.
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: nota-de-triagem
+
+providers:
+  # Dois fornecedores distintos de proposito: o mesmo prompt precisa sobreviver a
+  # troca de modelo. Divergencia entre eles e sinal de prompt fragil, nao de modelo ruim.
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      # Temperatura 0 nao garante determinismo nesta API. Sem seed, o mesmo caso
+      # alternou entre acertar e errar a regra de severidade entre execucoes.
+      seed: 42
+
+  # Este id foi trocado duas vezes, e o registro do motivo importa mais que o id final.
+  #
+  # A suite rodou primeiro em `gemini-2.5-flash`. Esse modelo foi descontinuado para
+  # projetos novos durante o proprio desenvolvimento da suite: um projeto criado depois
+  # recebe 404 com "no longer available to new users". Modelo fixado em config tem
+  # prazo de validade, e isso e risco de pipeline — o build quebra sem ninguem ter
+  # tocado no prompt, e a falha nao aparece como falha de qualidade.
+  #
+  # O substituto que o proprio Google indica e `gemini-3.8-flash`, e ele foi rejeitado
+  # aqui por dois motivos verificados no codigo do promptfoo 0.123.1: para aquela
+  # familia o promptfoo apaga `temperature` do corpo da requisicao antes de enviar
+  # (`removeDeprecatedGeminiGenerationParams`), de modo que declarar `temperature: 0`
+  # seria aceito pelo schema e descartado em silencio; e o modelo recusa
+  # `thinkingBudget`, aceitando so `thinkingLevel` com minimo LOW, o que deixa
+  # raciocinio obrigatorio dentro do orcamento de 5s.
+  #
+  # `gemini-3.5-flash` fica fora daquela lista: preserva temperatura e aceita desligar
+  # o raciocinio. Os dois controles que esta suite precisa continuam existindo.
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          # Raciocinio estendido vem ligado por padrao e ameaca o limite de 5s. A tarefa
+          # e transformacao de uma linha de texto: nao depende de cadeia longa.
+          thinkingBudget: 0
+
+# Asserts que valem para TODA saida, independente do alerta de entrada.
+defaultTest:
+  assert:
+    # 1. Os cinco rotulos do padrao definido pela Head of Product.
+    - type: contains
+      value: 'ALERTA:'
+    - type: contains
+      value: 'IMPACTO:'
+    - type: contains
+      value: 'HIPÓTESE INICIAL:'
+    - type: contains
+      value: 'AÇÃO IMEDIATA:'
+    - type: contains
+      value: 'ESCALAR PARA:'
+
+    # 2. O campo de escalonamento tem handle no formato arroba mais palavra.
+    - type: regex
+      value: 'ESCALAR PARA:.*@\w+'
+
+    # 3. A nota e concisa: no maximo 8 linhas.
+    - type: javascript
+      value: |
+        const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+        return linhas.length <= 8
+          ? true
+          : { pass: false, score: 0, reason: `nota com ${linhas.length} linhas, maximo permitido 8` };
+
+    # 4. Nenhum preambulo: a saida comeca no rotulo ALERTA.
+    - type: javascript
+      value: |
+        return output.trimStart().startsWith('ALERTA:')
+          ? true
+          : { pass: false, score: 0, reason: `saida nao comeca em "ALERTA:" e sim em "${output.trimStart().slice(0, 40)}"` };
+
+    # Limites operacionais. Latencia e custo sao parte da qualidade do item de playbook:
+    # nota de triagem lida em plantao que demora 20s ou custa caro nao serve.
+    # O limite de latencia so tem significado com --no-cache; resultado de cache responde
+    # em milissegundos e o assert passaria sem medir nada.
+    - type: latency
+      threshold: 5000
+    - type: cost
+      threshold: 0.01
+
+tests:
+  - description: Sentinel com autoscaler no teto e fila crescendo
+    vars:
+      # mapa_escalacao fica ausente de proposito nos tres casos: e o caminho de
+      # fallback para o mapa padrao declarado no corpo do prompt, e e ele que o
+      # plantao vai usar na pratica.
+      alerta_cru: >-
+        2026-05-12 14:02:09 UTC [Sentinel] autoscaler hit max replicas (60/60)
+        on sentinel-api, queue depth on Relay growing 2k/min, CPU avg 88%,
+        tenant stark-industries sending 4x baseline volume after onboarding new region
+    assert:
+      # O alerta cita tres sistemas. O handle tem que sair do sistema emissor,
+      # que e o da tag entre colchetes, e nao de um dos sistemas mencionados.
+      - type: contains
+        value: '@sentinel-core'
+
+  - description: Relay com rejeicao de ingestao apos deploy
+    vars:
+      alerta_cru: >-
+        2026-05-13 03:11:00 UTC [Relay] ingest reject rate 6% for 8min,
+        tenant wakanda-systems, buffer saturated after deploy 02:55
+    assert:
+      - type: contains
+        value: '@relay-core'
+      # Este caso e a armadilha de contaminacao: o exemplo de formato embutido no
+      # prompt descreve o MESMO incidente, com numeros e ferramenta proprios.
+      # Nada dele pode aparecer na nota.
+      - type: not-contains
+        value: '09:14'
+      - type: not-contains
+        value: 'Argo CD'
+      - type: not-contains
+        value: '12%'
+      # O horario do alerta real precisa aparecer.
+      - type: contains
+        value: '02:55'
+
+  - description: Forge com lag de consumer apos falha de job
+    vars:
+      alerta_cru: >-
+        2026-05-13 11:40:22 UTC [Forge] consumer lag 9min and climbing,
+        batch forge-batch-ingest delayed after previous job failure,
+        downstream Sentinel starting to lag
+    assert:
+      - type: contains
+        value: '@data-platform'
+      # Dado retido no pipeline, apenas atrasado: a regra de reversibilidade do
+      # dano manda 20min, nao 10min.
+      - type: regex
+        value: 'ESCALAR PARA:.*em 20min'
