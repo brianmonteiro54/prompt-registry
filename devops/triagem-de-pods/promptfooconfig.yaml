@@ -1,0 +1,208 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de avaliacao do prompt `triagem-de-pods`.
+#
+# Rodar da raiz do repositorio:  npx promptfoo eval -c devops/triagem-de-pods/promptfooconfig.yaml
+#
+# O prompt e carregado por `prompt.js`, que le o `prompt.md` desta pasta e descarta o
+# frontmatter YAML.
+
+description: Triagem de pods a partir de snapshot de kubectl
+
+# Execucao sequencial: o assert de latencia so tem significado quando as chamadas nao
+# competem entre si. Sob concorrencia, fila do provedor reprovaria o build por carga da
+# API e nao por regressao do prompt.
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: triagem-de-pods
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      # Temperatura 0 nao garante determinismo nesta API. Sem seed, o mesmo caso
+      # alternou entre acertar e errar a regra de severidade entre execucoes.
+      seed: 42
+
+  # Migrado de `gemini-2.5-flash`, descontinuado para projetos novos durante o
+  # desenvolvimento desta suite. Ver nota no config de `nota-de-triagem`.
+  # Migrado de `gemini-2.5-flash`, descontinuado para projetos novos durante o
+  # desenvolvimento desta suite. A escolha nao foi o substituto sugerido pelo Google:
+  # ver a justificativa completa no config de `nota-de-triagem`.
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 0
+
+defaultTest:
+  assert:
+    # A saida sempre abre pelo veredito, sem preambulo.
+    - type: javascript
+      value: |
+        return output.trimStart().startsWith('VEREDITO:')
+          ? true
+          : { pass: false, score: 0, reason: `saida nao comeca em "VEREDITO:" e sim em "${output.trimStart().slice(0, 40)}"` };
+
+    # Teto de tamanho declarado no prompt.
+    - type: javascript
+      value: |
+        const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+        return linhas.length <= 24
+          ? true
+          : { pass: false, score: 0, reason: `triagem com ${linhas.length} linhas, maximo permitido 24` };
+
+    - type: latency
+      threshold: 5000
+    - type: cost
+      threshold: 0.01
+
+tests:
+  # ---------------------------------------------------------------------------
+  - description: Entrada 1 - pod reiniciando por OOMKilled
+    vars:
+      snapshot: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS             RESTARTS       AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running            0              6d
+        sentinel-api-7d9c8b6f4-h4m2t    0/1     CrashLoopBackOff   14 (90s ago)   42m
+        sentinel-worker-5b8f9c8d-jq7rs  1/1     Running            0              6d
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running            0              6d
+
+        $ kubectl describe pod sentinel-api-7d9c8b6f4-h4m2t -n sentinel-prod
+            State:          Waiting
+              Reason:       CrashLoopBackOff
+            Last State:     Terminated
+              Reason:       OOMKilled
+              Exit Code:    137
+            Limits:         memory: 512Mi
+            Requests:       memory: 256Mi
+        Events:
+          Type     Reason   Age                 From     Message
+          Warning  BackOff  2m (x18 over 40m)   kubelet  Back-off restarting failed container api
+
+        $ kubectl logs sentinel-api-7d9c8b6f4-h4m2t -n sentinel-prod --previous
+        2026-05-13 10:14:02 [INFO]  [api] startup complete, version 2.9.1
+        2026-05-13 10:14:48 [INFO]  [cache] loading 6h alert cache (heap 410Mi/512Mi)
+        2026-05-13 10:15:10 [WARN]  [runtime] high GC pressure, heap 498Mi/512Mi
+        2026-05-13 10:15:12 [FATAL] [runtime] out of memory, shutting down process
+    assert:
+      # Cita o pod exato, sem abreviar.
+      - type: contains
+        value: 'sentinel-api-7d9c8b6f4-h4m2t'
+      # Chega na causa e nao para no sintoma.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          return t.includes('oomkilled') || t.includes('memória') || t.includes('memoria')
+            ? true
+            : { pass: false, score: 0, reason: 'causa nao menciona OOMKilled nem memoria' };
+      # O sintoma vai para o campo de sintoma, nao para o de causa.
+      - type: contains
+        value: 'CrashLoopBackOff'
+      # Um pod problematico, nao mais.
+      - type: contains
+        value: '1 POD(S) PROBLEMATICO(S)'
+
+  # ---------------------------------------------------------------------------
+  - description: Entrada 2 - dois pods que nao sobem, por causas diferentes
+    vars:
+      snapshot: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS             RESTARTS   AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running            0          6d
+        sentinel-api-7d9c8b6f4-zzp10    0/1     ImagePullBackOff   0          8m
+        sentinel-ingest-8f7a9c5b-4dkqm  0/1     Pending            0          8m
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running            0          6d
+
+        $ kubectl describe pod sentinel-api-7d9c8b6f4-zzp10 -n sentinel-prod
+            State:    Waiting
+              Reason: ImagePullBackOff
+            Image:    registry.aegis.io/sentinel-api:2.9.2
+        Events:
+          Type     Reason   Age   From     Message
+          Warning  Failed   7m    kubelet  Failed to pull image "registry.aegis.io/sentinel-api:2.9.2": manifest unknown
+          Warning  Failed   7m    kubelet  Error: ErrImagePull
+          Normal   BackOff  6m    kubelet  Back-off pulling image "registry.aegis.io/sentinel-api:2.9.2"
+
+        $ kubectl describe pod sentinel-ingest-8f7a9c5b-4dkqm -n sentinel-prod
+            State:    Waiting
+              Reason: Pending
+            Requests: cpu: 2
+        Events:
+          Type     Reason            Age   From               Message
+          Warning  FailedScheduling  7m    default-scheduler  0/6 nodes are available: 6 Insufficient cpu
+    assert:
+      # Os dois pods problematicos, nomeados.
+      - type: contains
+        value: 'sentinel-api-7d9c8b6f4-zzp10'
+      - type: contains
+        value: 'sentinel-ingest-8f7a9c5b-4dkqm'
+      # Causa do primeiro: a tag que nao existe no registry.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          return t.includes('2.9.2') || t.includes('manifest unknown')
+            ? true
+            : { pass: false, score: 0, reason: 'causa do ImagePullBackOff nao cita a tag 2.9.2 nem manifest unknown' };
+      # Causa do segundo: falta de cpu no cluster.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          return t.includes('insufficient') || t.includes('cpu')
+            ? true
+            : { pass: false, score: 0, reason: 'causa do Pending nao cita Insufficient nem cpu' };
+      - type: contains
+        value: '2 POD(S) PROBLEMATICO(S)'
+      # O servico de ingestao nao tem replica saudavel, entao e o mais grave e vem
+      # primeiro. Verifica que a regra de severidade por sobrevivencia do servico
+      # produziu a ordenacao esperada.
+      - type: javascript
+        value: |
+          const i = output.indexOf('sentinel-ingest-8f7a9c5b-4dkqm');
+          const a = output.indexOf('sentinel-api-7d9c8b6f4-zzp10');
+          return i >= 0 && a >= 0 && i < a
+            ? true
+            : { pass: false, score: 0, reason: 'o pod de ingestao (sem replica saudavel) deveria vir antes do pod de api' };
+      - type: contains
+        value: 'CRITICA'
+
+  # ---------------------------------------------------------------------------
+  - description: Entrada 3 - cluster saudavel, nao deve forcar diagnostico
+    vars:
+      snapshot: |
+        $ kubectl get pods -n sentinel-prod
+        NAME                            READY   STATUS    RESTARTS     AGE
+        sentinel-api-7d9c8b6f4-2xk9p    1/1     Running   0            6d
+        sentinel-api-7d9c8b6f4-h4m2t    1/1     Running   0            6d
+        sentinel-worker-5b8f9c8d-jq7rs  1/1     Running   1 (3d ago)   6d
+        sentinel-scheduler-6c4d7f-nn8vx 1/1     Running   0            6d
+
+        $ kubectl logs sentinel-api-7d9c8b6f4-2xk9p -n sentinel-prod --tail=3
+        2026-05-13 11:02:31 [INFO] [api] health check OK, 0 errors in the last 5min
+        2026-05-13 11:03:31 [INFO] [api] processed 4.2k alerts/min, p99 latency 120ms
+        2026-05-13 11:04:31 [INFO] [api] health check OK
+    assert:
+      # Indica ausencia de problema.
+      - type: contains
+        value: 'NENHUM POD PROBLEMATICO'
+      # E nao classifica nenhum pod como em falha. Isto so e testavel por ausencia
+      # porque o prompt reserva os rotulos de diagnostico ao caso com problema:
+      # o vocabulario do caso saudavel e disjunto do vocabulario do caso com falha.
+      - type: not-contains
+        value: 'CAUSA_RAIZ:'
+      - type: not-contains
+        value: 'SEVERIDADE:'
+      - type: not-contains
+        value: 'ACAO_RECOMENDADA:'
+      # O restart antigo do worker e observacao, nao falha: nao pode virar diagnostico.
+      - type: javascript
+        value: |
+          const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+          return linhas.length <= 3
+            ? true
+            : { pass: false, score: 0, reason: `caso saudavel com ${linhas.length} linhas; esperado veredito mais ate 2 de observacoes` };
