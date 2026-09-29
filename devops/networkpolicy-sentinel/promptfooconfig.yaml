@@ -1,0 +1,159 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de avaliacao do prompt `networkpolicy-sentinel`.
+#
+# Rodar da raiz do repositorio:
+#   npx promptfoo eval -c devops/networkpolicy-sentinel/promptfooconfig.yaml
+#
+# O prompt e carregado por `prompt.js`, que le o `prompt.md` desta pasta e descarta o
+# frontmatter YAML.
+
+description: Endurecimento de NetworkPolicy permissiva contra padrao de compliance
+
+# Execucao sequencial: o assert de latencia so tem significado quando as chamadas nao
+# competem entre si.
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: networkpolicy-sentinel
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+
+  # Migrado de `gemini-2.5-flash`, descontinuado para projetos novos durante o
+  # desenvolvimento desta suite. Ver nota no config de `nota-de-triagem`.
+  # Migrado de `gemini-2.5-flash`, descontinuado para projetos novos durante o
+  # desenvolvimento desta suite. A escolha nao foi o substituto sugerido pelo Google:
+  # ver a justificativa completa no config de `nota-de-triagem`.
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 0
+
+tests:
+  - description: Manifesto permissivo do namespace do produto core
+    vars:
+      manifesto_atual: |
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: sentinel-allow
+          namespace: sentinel-prod
+        spec:
+          podSelector: {}
+          policyTypes:
+            - Ingress
+            - Egress
+          ingress:
+            - {}
+          egress:
+            - {}
+
+      regras_do_padrao: |
+        NetworkPolicy para o namespace "sentinel-prod":
+        - pods do Sentinel so aceitam trafego de entrada do Relay (consumo de
+          eventos) e do gateway de API da plataforma
+        - pods do Sentinel so fazem saida para: Forge (warehouse, porta 5432),
+          Cerebro (busca, porta 9200) e DNS interno
+        - nada de "allow all" em ingress ou egress
+        - politica default-deny explicita no namespace
+        - toda regra precisa de comentario dizendo qual fluxo legitimo ela libera
+
+      mapa_de_servicos: |
+        Sentinel     -> namespace sentinel-prod, pods com label app=sentinel
+        Relay        -> namespace relay-prod,    pods com label app=relay
+        API gateway  -> namespace edge,          pods com label app=api-gateway
+        Forge        -> namespace forge-prod,    pods com label app=forge,   porta 5432
+        Cerebro      -> namespace cerebro-prod,  pods com label app=cerebro, porta 9200
+        DNS interno  -> namespace kube-system,   pods com label k8s-app=kube-dns, porta 53
+
+      # Vazio: primeira versao, sem apontamentos de revisao anterior.
+      apontamentos: ''
+
+    assert:
+      # --- 1. E YAML de NetworkPolicy com as duas direcoes declaradas ---
+      - type: contains
+        value: 'kind: NetworkPolicy'
+      - type: contains
+        value: 'Ingress'
+      - type: contains
+        value: 'Egress'
+
+      # Parseia de fato, e nao so contem as palavras. Aceita multiplos documentos,
+      # porque a entrega esperada tem a politica de negacao padrao separada da de
+      # permissao.
+      - type: javascript
+        value: file://asserts.js:yamlValidoComAsDuasDirecoes
+
+      # --- 2. Nao ha regra allow-all ---
+      # Assert por STRING EXATA da regra vazia, e nao por presenca de chaves.
+      # A distincao importa: `podSelector: {}` e a forma documentada do seletor que
+      # cobre todos os pods do namespace, e e exatamente o que a politica de negacao
+      # padrao precisa. Procurar chaves reprovaria a forma correta junto com a errada.
+      - type: not-contains
+        value: '- {}'
+
+      # E a verificacao semantica correspondente: nenhum item de regra pode ser vazio,
+      # em qualquer das duas direcoes. Um item vazio libera qualquer origem ou destino.
+      - type: javascript
+        value: file://asserts.js:semRegraQueLiberaTudo
+
+      # --- 3. Egress libera Forge na 5432 e Cerebro na 9200; ingress libera o Relay ---
+      - type: contains
+        value: '5432'
+      - type: contains
+        value: '9200'
+      - type: contains
+        value: 'app: relay'
+
+      # Verificacao semantica: cada par destino-porta esperado existe, e a porta esta
+      # no mesmo item do destino. Um item com os dois destinos e as duas portas juntos
+      # liberaria o produto cartesiano, que foi o defeito bloqueador encontrado na
+      # revisao da primeira versao no Checkpoint 06.
+      - type: javascript
+        value: file://asserts.js:egressPorParDestinoPorta
+
+      # DNS precisa dos dois protocolos na porta 53. Liberar so um produz falha
+      # intermitente, visivel em parte das consultas e caro de diagnosticar.
+      - type: javascript
+        value: file://asserts.js:dnsComOsDoisProtocolos
+
+      # --- 4. Toda regra tem comentario ---
+      # Um comentario na linha imediatamente acima de cada item de regra, nomeando o
+      # fluxo. Comentario generico nao e verificavel por string, mas ausencia e.
+      - type: javascript
+        value: file://asserts.js:todaRegraComentada
+
+      # A saida e YAML puro: nada de cerca de bloco de codigo nem prosa antes.
+      - type: javascript
+        value: file://asserts.js:saidaEhYamlPuro
+
+      # --- Limites operacionais ---
+      # Este prompt e o maior do catalogo e produz a saida mais longa. As outras duas
+      # suites usam 5000ms e US$0.01, e esses numeros foram copiados para ca antes de
+      # existir medicao. Medido depois, o modelo que acerta 100% do conteudo entrega em
+      # 5319ms e 5945ms, custando US$0.0137 e US$0.0152. Ou seja: os limites herdados
+      # reprovavam o baseline correto.
+      #
+      # Limite que ja esta vermelho no baseline nao detecta regressao nenhuma, so ensina
+      # o time a ignorar a suite. Entao os dois limites passam a vir da medicao, com
+      # folga suficiente para variacao normal e aperto suficiente para pegar o dobro.
+      #
+      # A alternativa considerada foi manter 5000ms e US$0.01 e registrar a reprovacao
+      # como divida. Rejeitada: aqui o artefato novo e a propria suite, nao ha execucao
+      # anterior dela para preservar, e deixar dois alarmes falsos permanentes esconderia
+      # os alarmes verdadeiros que esta suite de fato encontrou no outro modelo.
+      - type: latency
+        # ~70% acima do pior tempo medido no baseline correto (5945ms).
+        threshold: 10000
+      - type: cost
+        # ~2x o pior custo medido no baseline correto (US$0.0152). Saida deste prompt
+        # nao tem teto de linhas por decisao de projeto, entao o custo e o freio.
+        threshold: 0.03
