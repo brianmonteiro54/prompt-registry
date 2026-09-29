@@ -1,0 +1,16 @@
+CRITERIO 1 — CAUSA-RAIZ CORRETA.
+
+Mede se a análise aponta a causa real e não apenas os sintomas.
+
+2 pontos (score 1.0): identifica o job de reindexação que não terminou como origem do
+incidente, E a cadeia causal vai de job estagnado -> heap da JVM esgotado -> circuit
+breaker acionado -> timeout de busca e queda do cache. Faz a aritmética temporal de forma
+explícita: compara o horário de término que a config previa com o horário observado nos
+artefatos e quantifica o atraso.
+
+1 ponto (score 0.5): chega ao recurso saturado correto (memória da JVM) mas não amarra ao
+job estagnado como origem, OU inverte um elo da cadeia, OU não faz a aritmética temporal.
+
+0 pontos (score 0.0): aponta a lentidão de busca, o pico de indexação ou o circuit breaker
+como causa. Todos são elos posteriores na cadeia; tratá-los como origem levaria o plantão
+a agir no lugar errado.

@@ -76,11 +76,17 @@ que separa investigação de descrição.
 Mede se a ação proposta ataca a causa encontrada, e se o risco declarado corresponde ao
 risco real de executá-la em produção.
 
+O enunciado define este critério como "propõe uma ação coerente com o diagnóstico (ex.:
+conter ou reagendar a reindexação, rever heap/limites), sem sobre nem subdimensionar".
+Os três exemplos citados são aceitáveis, inclusive rever heap e limites — o que reprova
+não é mexer em capacidade, é mexer **só** em capacidade e deixar o job intacto, porque aí
+o incidente reincide no próximo agendamento.
+
 | Nota | Condição |
 |:---:|---|
-| **2** | Contenção age sobre o job estagnado (cancelar ou interromper), e não sobre o sintoma. A correção de fundo nomeia o parâmetro da config que muda — limite de duração, reagendamento ou isolamento do job. O risco de cada ação identifica quem é afetado, ou declara que a classificação é provisória por falta do mapa de dependências. |
+| **2** | A ação é coerente com o diagnóstico e corretamente dimensionada. A contenção age sobre o job estagnado (cancelar, interromper ou reagendar), e não sobre o sintoma. A correção de fundo nomeia o parâmetro da config que muda — limite de duração do job, agendamento, isolamento, e pode incluir revisão de heap ou de limites junto disso. O risco de cada ação identifica quem é afetado, ou declara que a classificação é provisória por falta do mapa de dependências. |
 | **1** | Age sobre a causa mas a correção de fundo é genérica e não ancorada em parâmetro da config, ou o risco declarado ignora o efeito colateral da própria ação. |
-| **0** | Propõe aumentar memória, adicionar nó ou reiniciar o serviço como correção de fundo. É o reflexo de quem não investigou: alivia o sintoma e o incidente reincide no próximo agendamento. |
+| **0** | A ação é incoerente com o diagnóstico ou mal dimensionada: mexe apenas em capacidade (aumentar heap, adicionar nó) ou apenas reinicia o serviço, sem tocar no job que é a origem. Alivia o sintoma e o incidente reincide no próximo agendamento. |
 
 ## Critério 4 — Honestidade epistêmica
 

@@ -1,0 +1,32 @@
+CRITERIO 3 — ACAO PROPORCIONAL.
+
+Mede se a ação proposta é coerente com o diagnóstico e corretamente dimensionada, sem
+sobredimensionar nem subdimensionar.
+
+Sobre o TIPO de ação: conter a reindexação, reagendá-la e rever heap ou limites são todas
+ações aceitáveis. O que não é aceitável é mexer apenas em capacidade e deixar o job
+intacto, porque aí o incidente reincide no próximo agendamento.
+
+2 pontos (score 1.0): TODAS as três condições a seguir:
+(a) a contenção age sobre o job estagnado — cancelar, interromper ou reagendar — e não
+    sobre o sintoma;
+(b) a correção de fundo nomeia qual parâmetro da config muda (limite de duração do job,
+    agendamento ou isolamento), e pode incluir revisão de heap ou de limites junto disso;
+(c) a declaração de risco de CADA UMA das duas ações identifica quem é afetado — qual
+    consumidor, qual fluxo, qual dado fica indisponível ou defasado — OU declara
+    explicitamente que a classificação é provisória por ausência do mapa de dependências
+    do serviço.
+
+Confira a condição (c) ação por ação, e não no conjunto. Uma ação com risco bem descrito
+não compensa a outra. Risco declarado apenas como "Baixo", "Médio" ou "Alto" seguido de
+justificativa que fala do que a mudança altera, sem dizer quem sofre o efeito, NÃO cumpre
+a condição (c): descrever a natureza da mudança não é identificar o afetado.
+
+1 ponto (score 0.5): cumpre (a), mas falha em (b) ou em (c). Exemplos que valem 1 ponto:
+a correção de fundo é genérica e não está ancorada em parâmetro da config; OU a declaração
+de risco de ao menos uma das ações ignora o efeito colateral da própria ação e não nomeia
+afetado nem se declara provisória.
+
+0 pontos (score 0.0): falha em (a) — a ação é incoerente com o diagnóstico ou mal
+dimensionada. Exemplos: mexe apenas em capacidade (aumentar heap, adicionar nó) ou apenas
+reinicia o serviço, sem tocar no job que é a origem do incidente.

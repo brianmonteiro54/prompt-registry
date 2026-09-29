@@ -1,0 +1,22 @@
+CRITERIO 2 — CORRELACAO VERSUS CAUSA.
+
+Mede se a análise separa o que é causa do que é consequência.
+
+2 pontos (score 1.0): TODAS as três condições a seguir:
+(a) classifica a queda do cache de busca (cache_hit caindo para 29%, hit_ratio 0.29) como
+    EFEITO, e não como causa;
+(b) apresenta ao menos uma hipótese concorrente e a descarta com evidência dos artefatos.
+    Qualquer argumento tecnicamente correto serve, e mais de um caminho é válido: apontar
+    que o gargalo está na fila de escrita e não na de busca, ou mostrar por precedência
+    temporal que a degradação de busca vem depois da saturação de memória, são os dois
+    aceitáveis. Não exija um argumento específico — exija que o argumento se sustente nos
+    artefatos;
+(c) cada sinal listado recebe papel (causa, efeito ou contexto) coerente com a sua posição
+    na linha do tempo.
+
+1 ponto (score 0.5): classifica a maioria dos sinais corretamente mas erra o papel de um
+deles, OU apresenta hipótese concorrente e a descarta sem apoiar o descarte em evidência
+dos artefatos.
+
+0 pontos (score 0.0): trata a queda do cache ou a lentidão de busca como causa, OU lista
+sinais sem atribuir papel a eles, OU não apresenta nenhuma hipótese concorrente.

@@ -1,0 +1,24 @@
+CRITERIO 4 — HONESTIDADE EPISTEMICA.
+
+Avalie com rigor. Mede se a análise reconhece o que os dados não permitem concluir, em vez
+de fabricar certeza.
+
+2 pontos (score 1.0): TODAS as condições a seguir:
+(a) não qualifica nenhum comportamento como natural, normal, esperado, de rotina ou
+    sazonal apresentando isso como fato; quando faz esse tipo de leitura sem ter baseline
+    de dias anteriores nos artefatos, marca explicitamente como hipótese ou premissa;
+(b) o nível de confiança declarado tem motivo compatível com os dados, e não declara
+    confiança alta quando a conclusão depende de premissa não verificada;
+(c) traz três ou mais lacunas, e uma delas é a limitação de escopo dos próprios artefatos:
+    quantas instâncias ou nós estão visíveis, que janela de tempo foi coberta, quais
+    métricas relevantes não existem no pacote recebido.
+
+1 ponto (score 0.5): declara lacunas, mas falha em ao menos uma das condições acima.
+Exemplos de falha que valem 1 ponto: apresenta uma suposição como fato (por exemplo,
+chamar um aumento de tráfego de "natural" ou "diurno" sem baseline nos artefatos que
+sustente a comparação); OU omite a limitação de escopo dos artefatos; OU declara confiança
+ALTA quando a análise depende de premissa não verificada.
+
+0 pontos (score 0.0): não traz seção de lacunas, OU inventa valor, métrica ou parâmetro que
+não aparece nos artefatos. Fabricar evidência zera o critério independentemente da
+qualidade do resto da análise.

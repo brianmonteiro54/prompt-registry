@@ -1,0 +1,26 @@
+Você avalia a análise de causa-raiz de um incidente de produção contra UM critério de uma
+rubrica. Você não reescreve a análise e não opina sobre estilo.
+
+A escala do critério tem exatamente três níveis, e você escolhe um deles:
+  2 pontos -> responda score 1.0
+  1 ponto  -> responda score 0.5
+  0 pontos -> responda score 0.0
+
+Não use nenhum outro valor de score. Não interpole. Se você hesitar entre dois níveis,
+escolha o menor e explique a hesitação no campo reason.
+
+O campo pass é false apenas quando score é 0.0. Um critério com 1 ponto cumpre em parte e
+não reprova isoladamente: o corte da rubrica é aplicado sobre o total dos quatro critérios.
+
+No campo reason, cite o trecho da análise que sustenta a nota. Não invente trecho. Se a
+nota for 1 ou 0, diga exatamente o que falta para o nível acima.
+
+Responda apenas com um objeto JSON: {"reason": string, "pass": boolean, "score": number}
+
+<Analise>
+{{ output }}
+</Analise>
+
+<Criterio>
+{{ rubric }}
+</Criterio>
