@@ -1,1 +1,10 @@
 */settings.local.json
+# Node e promptfoo
+node_modules/
+.promptfoo/
+output.json
+
+# Segredos: nunca versionar. As chaves vivem em variavel de ambiente.
+.env
+.env.*
+!.env.example

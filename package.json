@@ -1,0 +1,20 @@
+{
+  "name": "aegis-prompt-registry",
+  "private": true,
+  "description": "Playbook de IA operacional da Aegis. Suite de avaliacao dos prompts do catalogo.",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "eval:triagem-de-pods": "promptfoo eval -c devops/triagem-de-pods/promptfooconfig.yaml",
+    "eval:nota-de-triagem": "promptfoo eval -c devops/nota-de-triagem/promptfooconfig.yaml",
+    "eval:networkpolicy": "promptfoo eval -c devops/networkpolicy-sentinel/promptfooconfig.yaml",
+    "eval:all": "promptfoo eval -c devops/*/promptfooconfig.yaml"
+  },
+  "devDependencies": {
+    "promptfoo": "0.123.1"
+  },
+  "dependencies": {
+    "js-yaml": "^5.4.2"
+  }
+}
