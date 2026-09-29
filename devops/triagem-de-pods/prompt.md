@@ -1,7 +1,7 @@
 ---
 nome: Triagem de Pods
 descricao: Recebe um snapshot de kubectl e devolve a triagem dos pods problemáticos com causa provável, evidência e próxima ação do plantão
-versao: 1.0.0
+versao: 1.0.1
 tags: [kubernetes, sre, plantao, triagem]
 inputs:
   - nome: snapshot
@@ -23,12 +23,18 @@ Um pod NÃO é problemático se está `Running`, com READY completo, e o último
 
 Identifique o serviço de cada pod pelo prefixo do nome, descartando os dois últimos segmentos separados por hífen (ex: `sentinel-api-7d9c8b6f4-2xk9p` pertence ao serviço `sentinel-api`).
 
+A seção 1 já decidiu quais pods são problemáticos, e esta seção NÃO altera essa lista: ela apenas atribui severidade aos pods que já foram classificados como problemáticos. Nenhum pod saudável entra no resultado por causa desta seção.
+
+Para decidir entre CRITICA e ALTA de um pod problemático, conte quantos pods do MESMO serviço estão `Running` com READY completo. Essa contagem mede a sobrevivência do serviço, e é ela que separa serviço inteiro fora do ar de serviço com réplica atendendo. Pular a contagem é o erro que classifica como ALTA um pod cujo serviço não tem nenhuma réplica de pé.
+
 Atribua a severidade por esta regra, sem julgamento subjetivo:
 - CRITICA: nenhum pod do mesmo serviço está `Running` com READY completo no snapshot. O serviço está inteiro fora.
 - ALTA: o pod está em falha, mas existe ao menos um pod do mesmo serviço `Running` com READY completo.
 - MEDIA: o pod está `Running` com READY completo e entrou por reinício recente (critério 1c).
 
 Ordene os pods problemáticos: CRITICA primeiro, depois ALTA, depois MEDIA. Em caso de empate, maior número de RESTARTS primeiro; persistindo o empate, ordem alfabética do nome do pod.
+
+Essa ordenação vale para a saída, e não apenas para a sua análise: emita os blocos de pod nessa ordem, mesmo quando ela for diferente da ordem em que os pods aparecem na listagem do snapshot. A ordem do snapshot é irrelevante. Se o pod mais grave aparecer por último na listagem, ele é o primeiro bloco da resposta — o plantonista lê de cima para baixo e precisa encontrar o pior caso na primeira linha.
 
 # 3. SINTOMA NAO E CAUSA
 
@@ -74,6 +80,8 @@ OBSERVACOES: <sinal observado e por que não é problema>
 Primeira linha:
 
 VEREDITO: <N> POD(S) PROBLEMATICO(S)
+
+O trecho `POD(S) PROBLEMATICO(S)` e literal: copie os parenteses com S exatamente como estao, inclusive quando N for 1. Nao ajuste para singular e nao reescreva a concordancia. A saida e lida por ferramenta antes de ser lida por pessoa.
 
 Em seguida, um bloco por pod, na ordem definida na secao 2, separados por uma linha em branco:
 
