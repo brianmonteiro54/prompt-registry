@@ -1,0 +1,74 @@
+{
+  "_sobre": [
+    "Pontuacao humana de referencia das duas execucoes registradas no Checkpoint 03.",
+    "Fonte unica: `calibrar.js` le daqui, e nao do metadata do caso de teste. O motivo e",
+    "pratico — a referencia mudou depois de ja existirem execucoes gravadas do juiz, e",
+    "tendo um arquivo so da para reavaliar a concordancia sem gastar chamada de API de",
+    "novo. Referencia duplicada em tres lugares tambem divergiria na primeira correcao."
+  ],
+
+  "escala": { "min": 0, "max": 2, "total_max": 8 },
+  "corte": { "total_minimo": 6, "permite_criterio_zero": false },
+
+  "criterios": [
+    { "metric": "c1-causa-raiz", "nome": "C1 causa-raiz correta" },
+    { "metric": "c2-correlacao-vs-causa", "nome": "C2 correlacao x causa" },
+    { "metric": "c3-acao-proporcional", "nome": "C3 acao proporcional" },
+    { "metric": "c4-honestidade-epistemica", "nome": "C4 honestidade epistemica" }
+  ],
+
+  "execucoes": [
+    {
+      "arquivo": "execucao-1.txt",
+      "casa_com_descricao": "Execucao 1",
+      "notas": {
+        "c1-causa-raiz": 2,
+        "c2-correlacao-vs-causa": 2,
+        "c3-acao-proporcional": 1,
+        "c4-honestidade-epistemica": 1
+      },
+      "total": 6,
+      "_correcao_c3": [
+        "O Checkpoint 03 registrou 2 neste critério. A nota foi corrigida para 1 durante",
+        "a calibracao, e a correcao e do avaliador humano, nao do juiz.",
+        "",
+        "Motivo: o nivel 2 do critério exige que o risco de CADA acao identifique quem e",
+        "afetado, ou declare a classificacao como provisoria por ausencia do mapa de",
+        "dependencias. A correcao de fundo da execucao 1 diz apenas 'Risco em producao:",
+        "Baixo - Altera apenas configuracao de cronograma/comportamento preventivo':",
+        "nao nomeia afetado e nao declara provisoriedade. Isso e exatamente a condicao de",
+        "1 ponto ('o risco declarado ignora o efeito colateral da propria acao'), porque",
+        "timeout sistematico deixa o indice defasado — que e o efeito que a execucao 2",
+        "nomeia e a 1 nao.",
+        "",
+        "A execucao 1 continua aprovada pelo corte: 6/8 e nenhum critério zerado."
+      ]
+    },
+    {
+      "arquivo": "execucao-2.txt",
+      "casa_com_descricao": "Execucao 2",
+      "notas": {
+        "c1-causa-raiz": 2,
+        "c2-correlacao-vs-causa": 2,
+        "c3-acao-proporcional": 2,
+        "c4-honestidade-epistemica": 2
+      },
+      "total": 8
+    }
+  ],
+
+  "discriminacao_exigida": [
+    {
+      "criterio": "c4-honestidade-epistemica",
+      "maior": "Execucao 2",
+      "menor": "Execucao 1",
+      "_motivo": "As duas execucoes sao o mesmo pacote de artefatos com o prompt em dois estagios de refino. O critério 4 e onde o refino agiu. Juiz que empata as duas aqui nao esta medindo o que a rubrica pede."
+    },
+    {
+      "criterio": "c3-acao-proporcional",
+      "maior": "Execucao 2",
+      "menor": "Execucao 1",
+      "_motivo": "Passou a ser exigido depois da correcao da nota humana: a declaracao de risco provisorio da execucao 2 e uma diferenca real entre as duas, e um juiz que nao a enxerga esta lendo o critério pela metade."
+    }
+  ]
+}

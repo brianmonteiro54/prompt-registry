@@ -1,0 +1,28 @@
+CAUSA RAIZ
+O job de reindexação agendado na config para 02:00 com duração de 90min falhou em concluir, estendendo-se por mais de 4.5h além do previsto (log 08:02 atesta progresso de apenas 38%). Ao colidir com o aumento natural da taxa de indexação a partir das 09:00 (métrica: 9800 docs/s), a retenção de memória do job esgotou a JVM. Isso disparou o Circuit Breaker (log 09:58 a 96%), expulsou o query cache (0.29) e gerou timeout na busca.
+Confiança: ALTA - Motivo: Consistência cronológica exata entre o atraso do job apontado nos logs, o esgotamento progressivo do JVM Heap nas métricas e o posterior disparo do disjuntor de memória.
+
+CADEIA CAUSAL
+Job de reindex estagnado (log 08:02) -> Saturação do JVM Heap e Circuit Breaker (log 09:58) -> Degradação de busca (métrica 10:00)
+
+SINAIS OBSERVADOS
+| Origem | Sinal (valor e horário) | Papel |
+|---|---|---|
+| Config | reindex_job schedule 02:00, avg 90min | CONTEXTO: Baseline do comportamento esperado (término 03:30). |
+| Log | 08:02: reindex task em 38% | CAUSA: Job atrasado em >4.5h retendo heap. |
+| Métrica | 09:00: indexed_docs_per_s sobe a 9800 | CONTEXTO: Tráfego natural diurno aumentando. |
+| Log | 09:31: circuit breaker usage 86% | EFEITO: Esgotamento do recurso primário (JVM Heap). |
+| Log | 09:58: circuit breaker tripped (96%) | EFEITO: Proteção ativa rejeitando escritas (bulk). |
+| Log | 09:58: cache eviction, hit_ratio 0.29 | EFEITO: Esvaziamento do cache para tentar salvar memória. |
+| Métrica | 10:00: search_p99_ms em 6700ms | EFEITO: Sintoma final gerado pela falta de cache e GC thrashing. |
+
+HIPOTESES CONCORRENTES
+- Pico de acessos e leitura saturou a capacidade de busca: Evidência Pró: search_p99_ms sobe a 6700ms às 10:00. Evidência Contra: O gargalo rastreado afeta threads de escrita (write thread pool full às 09:58) e os logs mostram despejo do query cache (09:58), indicando que a leitura lenta é efeito da falta de memória, não a causa. Veredito: Descartada.
+- Colisão do job de reindex com horário de pico estourou o Heap: Evidência Pró: Config prevê término 03:30, mas log 09:58 mostra job ativo (41%) rodando simultaneamente à carga diária de indexação, acionando o Circuit Breaker (96%). Veredito: Sustentada.
+
+ACAO
+- Contenção imediata: Cancelar ativamente a reindex task (88123) para aliviar o JVM Heap e estabilizar buscas. Risco em produção: Baixo - Adia a reindexação, mas restaura a saúde do cluster para clientes finais.
+- Correção de fundo: Alterar a config do reindex_job implementando um timeout ou cancelamento automático caso ultrapasse a janela esperada de 90min. Risco em produção: Baixo - Altera apenas configuração de cronograma/comportamento preventivo.
+
+LACUNAS
+- Por que o reindex job avançou apenas 38% entre 02:00 e 08:00 e quase nada depois: Necessário extrair os logs do nó cerebro-node-3 e as métricas de latência de disco estritamente na janela das 02:00 às 08:00 para diagnosticar a estagnação silenciosa.
