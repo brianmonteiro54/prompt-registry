@@ -1,0 +1,222 @@
+name: Avaliacao do playbook
+
+# Gate de qualidade do catalogo de prompts.
+#
+# -----------------------------------------------------------------------------------
+# POR QUE NAO A ACTION OFICIAL `promptfoo/promptfoo-action@v1`
+#
+# Ela foi o ponto de partida e tres coisas a inviabilizaram como gate aqui:
+#
+# 1. Ela recebe UM `config` e UM glob de `prompts`. O desenho deste repositorio e um
+#    `promptfooconfig.yaml` por prompt, ao lado do `prompt.md`, para o teste viajar junto
+#    com o prompt. Sao 9 configs, com providers e limites diferentes entre si.
+# 2. O gate de `causa-raiz` nao cabe na configuracao do promptfoo: o corte e
+#    "total >= 6 E nenhum critério zerado", e `threshold` de teste sobrescreve a
+#    reprovacao dos asserts individuais na versao 0.123.1. Precisa de script depois da
+#    eval, e a action nao tem onde encaixar isso.
+# 3. Ela e orientada a relatorio — roda a comparacao antes/depois e publica o link. O que
+#    este repositorio precisa e reprovar o build, com regra de escalonamento e repeticao.
+#
+# O que foi adotado dela: o padrao de cache, a publicacao do resultado como comentario no
+# pull request e a exigencia de Node >= 22.22 no runner.
+#
+# -----------------------------------------------------------------------------------
+# DECISAO — quando rodar
+#
+# Escolhido: pull request e push em `main`, com filtro de caminho.
+#
+# Alternativa rejeitada 1 — rodar em todo push de toda branch. Da o retorno mais cedo e
+# multiplica o custo pelo numero de commits de trabalho em progresso, que em repositorio
+# de prompt e alto porque se itera no texto. O retorno antecipado nao compensa: as
+# verificacoes que pegam erro de digitacao e de estrutura rodam de graca no job `estrutura`.
+# Alternativa rejeitada 2 — rodar so em `main`, depois do merge. Mais barato de todos e
+# transforma o gate em alarme: a regressao ja entrou quando o build falha.
+
+on:
+  pull_request:
+    paths:
+      - 'devops/**'
+      - 'desenvolvimento/**'
+      - 'criacao-conteudo/**'
+      - 'financas/**'
+      - 'produtividade/**'
+      - 'scripts/**'
+      - 'avaliacao/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/avaliacao.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'devops/**'
+      - 'desenvolvimento/**'
+      - 'criacao-conteudo/**'
+      - 'financas/**'
+      - 'produtividade/**'
+      - 'scripts/**'
+      - 'avaliacao/**'
+  # Permite forcar a suite inteira a mao, para quando se quer conferir o catalogo sem
+  # depender de um PR que toque arquivo compartilhado.
+  workflow_dispatch:
+    inputs:
+      escopo:
+        description: 'Escopo da avaliacao'
+        type: choice
+        default: todas
+        options: [todas, alterados]
+
+# Cancela execucao anterior da mesma referencia. Em repositorio de prompt se empilha
+# commit rapido, e pagar modelo por uma revisao que ja foi substituida e desperdicio.
+concurrency:
+  group: avaliacao-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ===================================================================================
+  # Job 1 — verificacoes sem custo. Roda SEMPRE, inclusive em PR de fork.
+  #
+  # Existe porque `pull_request` vindo de fork nao recebe os segredos do repositorio, por
+  # desenho do GitHub. Sem este job, um PR de fork nao teria verificacao nenhuma — e os
+  # erros mais comuns de manutencao de catalogo (frontmatter divergente entre prompt.md e
+  # README.md, placeholder renomeado sem atualizar `inputs`, prompt novo sem suite) sao
+  # justamente os que dao para pegar sem chamar modelo.
+  # ===================================================================================
+  estrutura:
+    name: Estrutura do catalogo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Verificar estrutura, frontmatter, parametros e cobertura
+        run: node scripts/verificar-estrutura.js
+
+      - name: Verificar que os carregadores de prompt funcionam
+        run: node scripts/verificar-carregadores.js
+
+      - name: Verificar que todo promptfooconfig.yaml e YAML valido
+        run: node scripts/verificar-configs.js
+
+  # ===================================================================================
+  # Job 2 — avaliacao com chamada de modelo. Depende de segredo.
+  #
+  # Pulado quando o PR vem de fork, porque os segredos nao estao disponiveis e o job
+  # falharia por falta de chave, nao por regressao.
+  #
+  # A alternativa seria `pull_request_target`, que roda com os segredos do repositorio
+  # base. REJEITADA: ela executa o workflow no contexto do repositorio base com acesso
+  # aos segredos, e este repositorio executa codigo do PR (`prompt.js`, `asserts.js`,
+  # `aplicar-corte.js`). Um PR malicioso exfiltraria as duas chaves de API. Fork
+  # contribui com o job de estrutura e um mantenedor roda a avaliacao completa.
+  # ===================================================================================
+  avaliacao:
+    name: Suites de avaliacao
+    runs-on: ubuntu-latest
+    needs: estrutura
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Precisa do historico para comparar com a base e descobrir o que mudou.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Cache do promptfoo. Observacao importante: as suites rodam com `--no-cache`, de
+      # proposito, porque resposta servida de cache responde em milissegundos e os asserts
+      # de latencia passariam sem medir nada. Este cache e do pacote e dos metadados da
+      # ferramenta, nao das respostas de modelo.
+      - name: Cache do promptfoo
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/promptfoo
+          key: ${{ runner.os }}-promptfoo-v1
+          restore-keys: ${{ runner.os }}-promptfoo-
+
+      - name: Descobrir arquivos alterados
+        id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          if ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "base indisponivel, escalonando para a suite inteira"
+            echo "arquivos=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          lista=$(git diff --name-only "$base" "$head" | paste -sd, -)
+          echo "arquivos alterados: ${lista:-nenhum}"
+          echo "arquivos=$lista" >> "$GITHUB_OUTPUT"
+
+      - name: Rodar as suites
+        id: suites
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PROMPTFOO_OUT_DIR: ${{ runner.temp }}/avaliacao
+          # Telemetria desligada: o insumo das suites inclui log e metrica que, num cenario
+          # real, seriam de producao.
+          PROMPTFOO_DISABLE_TELEMETRY: '1'
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.escopo }}" = "alterados" ]; then
+            modo=(--alterados "${{ steps.diff.outputs.arquivos }}")
+          elif [ "${{ github.event_name }}" = "pull_request" ] && [ -n "${{ steps.diff.outputs.arquivos }}" ]; then
+            modo=(--alterados "${{ steps.diff.outputs.arquivos }}")
+          else
+            modo=(--todas)
+          fi
+          node scripts/rodar-suites.js "${modo[@]}" --resumo "${{ runner.temp }}/resumo.md"
+
+      # Publica o resultado no PR mesmo quando o gate reprova — e justamente nesse caso
+      # que a informacao importa. Padrao adotado da action oficial.
+      - name: Comentar o resultado no pull request
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const caminho = `${process.env.RUNNER_TEMP}/resumo.md`;
+            const corpo = fs.existsSync(caminho)
+              ? fs.readFileSync(caminho, 'utf8')
+              : '## Avaliacao do playbook\n\nA execucao nao produziu resumo. Ver o log do job.';
+            const marca = '<!-- avaliacao-playbook -->';
+            const { owner, repo } = context.repo;
+            const numero = context.issue.number;
+            const anteriores = await github.rest.issues.listComments({ owner, repo, issue_number: numero });
+            const meu = anteriores.data.find((c) => c.body.includes(marca));
+            const texto = `${marca}\n${corpo}`;
+            if (meu) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: meu.id, body: texto });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: numero, body: texto });
+            }
+
+      - name: Guardar as saidas das evals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saidas-das-evals
+          path: ${{ runner.temp }}/avaliacao/*.json
+          retention-days: 14
+          if-no-files-found: warn
