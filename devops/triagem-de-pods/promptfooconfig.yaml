@@ -205,4 +205,4 @@ tests:
           const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
           return linhas.length <= 3
             ? true
-            : { pass: false, score: 0, reason: `caso saudavel com ${linhas.length} linhas; esperado veredito mais ate 2 de observacoes` };
+            : { pass: false, score: 0, reason: `caso saudavel com ${linhas.length} linhas; esperado o veredito mais no maximo 2 linhas de observacoes` };

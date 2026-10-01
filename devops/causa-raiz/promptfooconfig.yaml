@@ -134,8 +134,8 @@ defaultTest:
     #
     # O primeiro valor que escrevi aqui foi 0.08, antes de medir, e ele reprovou o
     # baseline na segunda execucao (US$0,0811) — o mesmo erro que a suite de
-    # networkpolicy-sentinel cometeu no Checkpoint 08. O numero abaixo vem das quatro
-    # execucoes registradas no Checkpoint 09.
+    # networkpolicy-sentinel cometeu no Checkpoint 08. O numero abaixo vem das seis
+    # execucoes registradas no Checkpoint 09, cujo pior custo medido foi US$0,0811.
     - type: cost
       threshold: 0.15
 

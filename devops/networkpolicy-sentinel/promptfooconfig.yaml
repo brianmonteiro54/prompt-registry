@@ -138,9 +138,9 @@ tests:
       # --- Limites operacionais ---
       # Este prompt e o maior do catalogo e produz a saida mais longa. As outras duas
       # suites usam 5000ms e US$0.01, e esses numeros foram copiados para ca antes de
-      # existir medicao. Medido depois, o modelo que acerta 100% do conteudo entrega em
-      # 5319ms e 5945ms, custando US$0.0137 e US$0.0152. Ou seja: os limites herdados
-      # reprovavam o baseline correto.
+      # existir medicao. Medido depois em tres execucoes, o modelo que acerta 100% do
+      # conteudo entrega em 5319ms, 5945ms e 5982ms, custando US$0.0137, US$0.0152 e
+      # US$0.0152. Ou seja: os limites herdados reprovavam o baseline correto.
       #
       # Limite que ja esta vermelho no baseline nao detecta regressao nenhuma, so ensina
       # o time a ignorar a suite. Entao os dois limites passam a vir da medicao, com
@@ -151,7 +151,7 @@ tests:
       # anterior dela para preservar, e deixar dois alarmes falsos permanentes esconderia
       # os alarmes verdadeiros que esta suite de fato encontrou no outro modelo.
       - type: latency
-        # ~70% acima do pior tempo medido no baseline correto (5945ms).
+        # ~67% acima do pior tempo medido no baseline correto (5982ms).
         threshold: 10000
       - type: cost
         # ~2x o pior custo medido no baseline correto (US$0.0152). Saida deste prompt

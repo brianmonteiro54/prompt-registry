@@ -54,14 +54,14 @@ defaultTest:
     # neste harness, e nao por inferencia — tres candidatos rodaram contra a mesma
     # referencia humana:
     #
-    #   gemini-3.5-flash  8 de 8 notas iguais a humana, reproduz as duas discriminacoes
-    #                     -> CALIBRADO
+    #   gemini-3.5-flash  7 de 8 notas iguais a humana, a oitava dentro de 1 ponto, e
+    #                     reproduz as duas discriminacoes -> CALIBRADO
     #   gpt-4o            7 de 8 notas iguais; nao distingue as duas execucoes no
     #                     critério 3, porque repete a leitura leniente que o humano
     #                     tinha feito -> nao calibrado
-    #   gpt-4o-mini       4 de 8; atribuiu 1 ponto a TODOS os critérios das duas
-    #                     execucoes, nao distingue nada e inverte a decisao de corte
-    #                     -> nao calibrado
+    #   gpt-4o-mini       2 de 8 notas iguais (total 4/8 nas duas); atribuiu 1 ponto a
+    #                     TODOS os critérios das duas execucoes, nao distingue nada e
+    #                     inverte a decisao de corte -> nao calibrado
     #
     # O gpt-4o-mini e o caso que mais ensina: nota uniforme no meio da escala parece
     # julgamento e nao carrega informacao nenhuma. Ele reprovaria as duas analises,
