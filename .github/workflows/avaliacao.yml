@@ -192,7 +192,7 @@ jobs:
       # que a informacao importa. Padrao adotado da action oficial.
       - name: Comentar o resultado no pull request
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
