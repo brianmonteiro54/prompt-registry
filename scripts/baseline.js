@@ -82,33 +82,80 @@ function lerExecucao(dir) {
       const descricao = r.testCase?.description ?? '(sem descricao)';
       const k = chave(suite, provider, descricao);
       const passou = Boolean(r.success);
-      // Tentativas posteriores sobrescrevem: a repeticao e que decide.
-      casos.set(k, {
-        suite,
-        provider,
-        descricao,
-        passou,
-        motivo: passou ? null : String(r.error ?? '').split('\n')[0].slice(0, 220),
-      });
+      const motivo = passou ? null : String(r.error ?? '').split('\n')[0].slice(0, 220);
+
+      const antes = casos.get(k);
+      if (!antes) {
+        casos.set(k, { suite, provider, descricao, passou, motivo, tentativas: [passou] });
+      } else {
+        // Tentativa posterior SOBRESCREVE o veredito (a repeticao e que decide no gate),
+        // e o historico fica guardado para `--gravar` detectar instabilidade.
+        antes.passou = passou;
+        antes.motivo = motivo;
+        antes.tentativas.push(passou);
+      }
     }
   }
   return casos;
 }
 
-function gravar(dir) {
-  const atual = lerExecucao(dir);
-  if (atual.size === 0) {
-    console.error(`nenhum resultado encontrado em ${dir}`);
+/**
+ * Agrega varias execucoes independentes do mesmo caso por CONSENSO.
+ *
+ * Um caso entra no baseline como `passa: true` somente se passou em TODAS as execucoes.
+ * Caso que oscila e registrado como falha conhecida e marcado `instavel`.
+ *
+ * A primeira versao de `--gravar` lia uma execucao unica, e isso produziu um baseline
+ * errado de forma silenciosa: um caso de `diagnostico-de-acoplamento` que acerta a
+ * classificacao em parte das geracoes foi gravado como "passa", e a primeira execucao no
+ * GitHub Actions reprovou a `main` por isso. Baseline tirado de amostra unica transforma
+ * instabilidade do modelo em regressao inexistente, e e o caminho mais curto para o time
+ * desligar o gate.
+ */
+function agregarPorConsenso(execucoes) {
+  const consolidado = new Map();
+  for (const casos of execucoes) {
+    for (const [k, c] of casos) {
+      const atual = consolidado.get(k);
+      if (!atual) {
+        consolidado.set(k, { ...c, passouSempre: c.passou, passouAlguma: c.passou, rodadas: 1 });
+      } else {
+        atual.passouSempre = atual.passouSempre && c.passou;
+        atual.passouAlguma = atual.passouAlguma || c.passou;
+        atual.rodadas += 1;
+        if (!c.passou && c.motivo) atual.motivo = c.motivo;
+      }
+    }
+  }
+  return consolidado;
+}
+
+function gravar(dirs) {
+  const execucoes = dirs.map((d) => lerExecucao(d)).filter((m) => m.size > 0);
+  if (execucoes.length === 0) {
+    console.error(`nenhum resultado encontrado em ${dirs.join(', ')}`);
     process.exit(2);
   }
+  if (execucoes.length === 1) {
+    console.warn('AVISO: baseline gravado de UMA execucao. Caso instavel sera gravado como');
+    console.warn('       estavel e a `main` vai reprovar por flutuacao. Passe 3 diretorios.');
+  }
+  const atual = agregarPorConsenso(execucoes);
+
   const porSuite = {};
+  let instaveis = 0;
   for (const c of [...atual.values()].sort((a, b) => chave(a.suite, a.provider, a.descricao).localeCompare(chave(b.suite, b.provider, b.descricao)))) {
+    const instavel = c.passouAlguma && !c.passouSempre;
+    if (instavel) instaveis++;
     porSuite[c.suite] ??= [];
     porSuite[c.suite].push({
       provider: c.provider,
       caso: c.descricao,
-      passa: c.passou,
-      ...(c.passou ? {} : { motivo_conhecido: c.motivo }),
+      // CONSENSO: passa no baseline so quem passou em todas as execucoes.
+      passa: c.passouSempre,
+      rodadas: c.rodadas,
+      ...(instavel ? { instavel: true } : {}),
+      ...(c.passouSempre ? {} : { motivo_conhecido: c.motivo }),
     });
   }
   const conteudo = {
@@ -120,18 +167,27 @@ function gravar(dir) {
       'nao e falha aceita em silencio: mudar este arquivo exige commit, e o diff fica',
       'visivel na revisao.',
       '',
-      'Regravar com:  node scripts/baseline.js --gravar <dir-com-json>',
+      'CONSENSO: um caso so entra como `passa: true` se passou em TODAS as execucoes',
+      'agregadas. Caso marcado `instavel: true` passa em parte das geracoes e falha em',
+      'outra parte, com o mesmo prompt e o mesmo modelo — ele entra como falha conhecida',
+      'de proposito, porque gravar instabilidade como estabilidade faz a `main` reprovar',
+      'por flutuacao e ensina o time a ignorar o gate.',
+      '',
+      'Regravar com:  npm run baseline:gravar -- <dir1> <dir2> <dir3>',
       'Ao regravar depois de corrigir um prompt, o commit deve explicar o que mudou.',
     ],
     gravado_em: new Date().toISOString().slice(0, 10),
+    execucoes_agregadas: execucoes.length,
     casos: porSuite,
   };
   fs.mkdirSync(path.dirname(ARQUIVO_BASELINE), { recursive: true });
   fs.writeFileSync(ARQUIVO_BASELINE, `${JSON.stringify(conteudo, null, 2)}\n`);
 
-  const passando = [...atual.values()].filter((c) => c.passou).length;
+  const passando = [...atual.values()].filter((c) => c.passouSempre).length;
   console.log(`baseline gravado em ${path.relative(RAIZ, ARQUIVO_BASELINE)}`);
-  console.log(`  ${atual.size} caso(s): ${passando} passando, ${atual.size - passando} com falha conhecida`);
+  console.log(`  execucoes agregadas: ${execucoes.length}`);
+  console.log(`  ${atual.size} caso(s): ${passando} passando sempre, ${atual.size - passando} com falha conhecida`);
+  console.log(`  ${instaveis} caso(s) instavel(eis) (passam em parte das geracoes)`);
 }
 
 function comparar(dir) {
@@ -234,10 +290,14 @@ function comparar(dir) {
 }
 
 const args = process.argv.slice(2);
-const dir = args[1] || process.env.PROMPTFOO_OUT_DIR || '/tmp/avaliacao-playbook';
-if (args[0] === '--gravar') gravar(dir);
-else if (args[0] === '--comparar') comparar(dir);
-else {
-  console.error('uso: node scripts/baseline.js (--comparar | --gravar) <dir-com-json>');
+const posicionais = args.slice(1).filter((a) => !a.startsWith('--') && args[args.indexOf(a) - 1] !== '--relatorio');
+const padrao = process.env.PROMPTFOO_OUT_DIR || '/tmp/avaliacao-playbook';
+
+if (args[0] === '--gravar') {
+  gravar(posicionais.length > 0 ? posicionais : [padrao]);
+} else if (args[0] === '--comparar') {
+  comparar(posicionais[0] || padrao);
+} else {
+  console.error('uso: node scripts/baseline.js --comparar <dir> | --gravar <dir1> [dir2 ...]');
   process.exit(2);
 }

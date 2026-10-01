@@ -7,39 +7,50 @@
     "nao e falha aceita em silencio: mudar este arquivo exige commit, e o diff fica",
     "visivel na revisao.",
     "",
-    "Regravar com:  node scripts/baseline.js --gravar <dir-com-json>",
+    "CONSENSO: um caso so entra como `passa: true` se passou em TODAS as execucoes",
+    "agregadas. Caso marcado `instavel: true` passa em parte das geracoes e falha em",
+    "outra parte, com o mesmo prompt e o mesmo modelo — ele entra como falha conhecida",
+    "de proposito, porque gravar instabilidade como estabilidade faz a `main` reprovar",
+    "por flutuacao e ensina o time a ignorar o gate.",
+    "",
+    "Regravar com:  npm run baseline:gravar -- <dir1> <dir2> <dir3>",
     "Ao regravar depois de corrigir um prompt, o commit deve explicar o que mudou."
   ],
   "gravado_em": "2026-10-01",
+  "execucoes_agregadas": 3,
   "casos": {
     "causa-raiz": [
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Cerebro 2026-05-13 — reindexacao estagnada saturando o heap",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       }
     ],
     "detalhamento-de-fase": [
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Fase 1 do plano registrado — detalhamento executavel",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Fase inexistente — tem que recusar e listar as fases do plano",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Fase 1 do plano registrado — detalhamento executavel",
-        "passa": false,
-        "motivo_conhecido": "5 passo(s) e apenas 4 declaracao(oes) de \"Reversivel sozinho\"; sem isso nao se sabe ate onde da para voltar"
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Fase inexistente — tem que recusar e listar as fases do plano",
         "passa": false,
+        "rodadas": 3,
         "motivo_conhecido": "fabricou critério de avanco para uma fase que nao existe no plano: \"Garantir que todos os consumidores estejam operando com o fluxo contínuo sem dependência do Relay\""
       }
     ],
@@ -47,37 +58,45 @@
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Forge em lote horario com tres consumidores acoplados",
-        "passa": true
+        "passa": false,
+        "rodadas": 3,
+        "instavel": true,
+        "motivo_conhecido": "classificou as 14 etapas do Spark como INCREMENTAL, mas o insumo nao descreve nenhuma delas; sem base, a classificacao correta e INDETERMINADO"
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Forge em lote horario com tres consumidores acoplados",
         "passa": false,
-        "motivo_conhecido": "risco silencioso na posicao 4 aparece depois de risco visivel na posicao 1; a etapa 4 manda silencioso primeiro"
+        "rodadas": 3,
+        "motivo_conhecido": "risco silencioso na posicao 3 aparece depois de risco visivel na posicao 1; a etapa 4 manda silencioso primeiro"
       }
     ],
     "estrategia-backpressure": [
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Relay com pico de 320k msgs/s sobre capacidade de 180k",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Relay com pico de 320k msgs/s sobre capacidade de 180k",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       }
     ],
     "networkpolicy-sentinel": [
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Manifesto permissivo do namespace do produto core",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Manifesto permissivo do namespace do produto core",
         "passa": false,
+        "rodadas": 3,
         "motivo_conhecido": "saida veio dentro de cerca de bloco de codigo; o prompt exige YAML puro"
       }
     ],
@@ -85,32 +104,38 @@
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Forge com lag de consumer apos falha de job",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Relay com rejeicao de ingestao apos deploy",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Sentinel com autoscaler no teto e fila crescendo",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Forge com lag de consumer apos falha de job",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Relay com rejeicao de ingestao apos deploy",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Sentinel com autoscaler no teto e fila crescendo",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       }
     ],
     "plano-de-migracao-faseado": [
@@ -118,12 +143,14 @@
         "provider": "google:gemini-3.5-flash",
         "caso": "Plano derivado do diagnostico registrado do elo 1",
         "passa": false,
-        "motivo_conhecido": "declarou \"- Nenhuma. O diagnóstico mapeia corretamente os ri\", mas o diagnostico herdado classifica a ingestao como EXIGE LOTE COMPLETO por critério de implementacao atual, contrariando o requisito de consumo continuo"
+        "rodadas": 3,
+        "motivo_conhecido": "declarou \"Nenhuma. O diagnóstico mapeia corretamente os risc\", mas o diagnostico herdado classifica a ingestao como EXIGE LOTE COMPLETO por critério de implementacao atual, contrariando o requisito de consumo continuo"
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Plano derivado do diagnostico registrado do elo 1",
         "passa": false,
+        "rodadas": 3,
         "motivo_conhecido": "reproduziu marcador do modelo de saida: \"[Nenhuma]\""
       }
     ],
@@ -131,66 +158,78 @@
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Politica conforme ao padrao — nao pode BARRAR",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Politica gerada pelo par — veredito coerente com os apontamentos",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Politica permissiva (allow-all) — tem que BARRAR",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Politica conforme ao padrao — nao pode BARRAR",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Politica gerada pelo par — veredito coerente com os apontamentos",
         "passa": false,
+        "rodadas": 3,
         "motivo_conhecido": "nao comentou o label de namespace usado pela politica e ausente do mapa de servicos (premissa nao declarada no insumo)"
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Politica permissiva (allow-all) — tem que BARRAR",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       }
     ],
     "triagem-de-pods": [
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Entrada 1 - pod reiniciando por OOMKilled",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Entrada 2 - dois pods que nao sobem, por causas diferentes",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "google:gemini-3.5-flash",
         "caso": "Entrada 3 - cluster saudavel, nao deve forcar diagnostico",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Entrada 1 - pod reiniciando por OOMKilled",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Entrada 2 - dois pods que nao sobem, por causas diferentes",
         "passa": false,
+        "rodadas": 3,
         "motivo_conhecido": "o pod de ingestao (sem replica saudavel) deveria vir antes do pod de api"
       },
       {
         "provider": "openai:gpt-4o-mini",
         "caso": "Entrada 3 - cluster saudavel, nao deve forcar diagnostico",
-        "passa": true
+        "passa": true,
+        "rodadas": 3
       }
     ]
   }
