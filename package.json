@@ -6,10 +6,21 @@
     "node": ">=22.22.0"
   },
   "scripts": {
-    "eval:triagem-de-pods": "promptfoo eval -c devops/triagem-de-pods/promptfooconfig.yaml",
-    "eval:nota-de-triagem": "promptfoo eval -c devops/nota-de-triagem/promptfooconfig.yaml",
-    "eval:networkpolicy": "promptfoo eval -c devops/networkpolicy-sentinel/promptfooconfig.yaml",
-    "eval:all": "promptfoo eval -c devops/*/promptfooconfig.yaml"
+    "verificar": "node scripts/verificar-estrutura.js && node scripts/verificar-carregadores.js && node scripts/verificar-configs.js",
+    "avaliar": "node scripts/rodar-suites.js --todas",
+    "avaliar:alterados": "node scripts/rodar-suites.js --alterados",
+    "baseline:gravar": "node scripts/baseline.js --gravar",
+    "baseline:comparar": "node scripts/baseline.js --comparar",
+    "calibrar": "promptfoo eval -c devops/causa-raiz/calibracao/promptfooconfig.yaml --no-cache -o /tmp/calibracao.json && node devops/causa-raiz/calibracao/calibrar.js /tmp/calibracao.json",
+    "eval:causa-raiz": "promptfoo eval -c devops/causa-raiz/promptfooconfig.yaml --no-cache",
+    "eval:detalhamento-de-fase": "promptfoo eval -c devops/detalhamento-de-fase/promptfooconfig.yaml --no-cache",
+    "eval:diagnostico-de-acoplamento": "promptfoo eval -c devops/diagnostico-de-acoplamento/promptfooconfig.yaml --no-cache",
+    "eval:estrategia-backpressure": "promptfoo eval -c devops/estrategia-backpressure/promptfooconfig.yaml --no-cache",
+    "eval:networkpolicy-sentinel": "promptfoo eval -c devops/networkpolicy-sentinel/promptfooconfig.yaml --no-cache",
+    "eval:nota-de-triagem": "promptfoo eval -c devops/nota-de-triagem/promptfooconfig.yaml --no-cache",
+    "eval:plano-de-migracao-faseado": "promptfoo eval -c devops/plano-de-migracao-faseado/promptfooconfig.yaml --no-cache",
+    "eval:revisao-de-networkpolicy": "promptfoo eval -c devops/revisao-de-networkpolicy/promptfooconfig.yaml --no-cache",
+    "eval:triagem-de-pods": "promptfoo eval -c devops/triagem-de-pods/promptfooconfig.yaml --no-cache"
   },
   "devDependencies": {
     "promptfoo": "0.123.1"
