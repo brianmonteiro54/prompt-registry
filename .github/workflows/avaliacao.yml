@@ -169,6 +169,22 @@ jobs:
           echo "arquivos alterados: ${lista:-nenhum}"
           echo "arquivos=$lista" >> "$GITHUB_OUTPUT"
 
+      # Falha rapido e com mensagem clara quando falta segredo. Sem isto, a avaliacao roda,
+      # erra tudo por falta de chave e o diagnostico fica escondido em 9 falhas de suite.
+      - name: Conferir que os segredos estao configurados
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: |
+          faltando=""
+          [ -z "$OPENAI_API_KEY" ] && faltando="$faltando OPENAI_API_KEY"
+          [ -z "$GOOGLE_API_KEY" ] && faltando="$faltando GOOGLE_API_KEY"
+          if [ -n "$faltando" ]; then
+            echo "::error::Segredo(s) ausente(s):$faltando. Configure em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          echo "segredos presentes"
+
       - name: Rodar as suites
         id: suites
         env:

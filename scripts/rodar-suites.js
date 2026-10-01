@@ -180,6 +180,54 @@ function main() {
   let rel = fs.existsSync(relatorio) ? JSON.parse(fs.readFileSync(relatorio, 'utf8')) : null;
   let repetidas = [];
 
+  // GATE FECHA QUANDO NAO CONSEGUE AVALIAR.
+  //
+  // Esta verificacao existe por causa de uma falha real deste arquivo. A primeira versao
+  // calculava `reprova = Boolean(rel && rel.reprova)`, de modo que relatorio ausente
+  // virava "nao reprova". A primeira execucao no GitHub Actions rodou sem os segredos
+  // configurados, as 9 suites falharam em 2 segundos cada, nenhum JSON foi produzido, a
+  // comparacao nao gerou relatorio — e o job PASSOU.
+  //
+  // Gate que passa quando a avaliacao nao roda e pior que gate nenhum: ele produz um
+  // sinal verde que ninguem vai conferir. Falta de chave, cota estourada, modelo
+  // descontinuado e erro de sintaxe num assert sao todos "nao consegui avaliar", e
+  // "nao consegui avaliar" nunca e "esta tudo bem".
+  if (!rel) {
+    console.log('\n=== VEREDITO DO GATE');
+    console.log('    REPROVADO: a comparacao com o baseline nao produziu relatorio.');
+    console.log('    Isso indica falha de infraestrutura e nao ausencia de regressao.');
+    console.log('    Causas tipicas: chave de API ausente ou invalida, cota do provedor');
+    console.log('    estourada, modelo descontinuado, erro de sintaxe em assert.');
+    if (cmp.saida.trim()) console.log(`\n    saida da comparacao:\n${cmp.saida.trimEnd()}`);
+    if (arquivoResumo) {
+      fs.writeFileSync(
+        arquivoResumo,
+        [
+          '## Avaliacao do playbook',
+          '',
+          '### Gate reprovado: a avaliacao nao conseguiu rodar',
+          '',
+          'A comparacao com o baseline nao produziu relatorio, o que indica falha de',
+          'infraestrutura e nao ausencia de regressao. Verifique chave de API, cota do',
+          'provedor e disponibilidade do modelo.',
+          '',
+          '```',
+          cmp.saida.trim().slice(0, 1500),
+          '```',
+        ].join('\n'),
+      );
+    }
+    process.exit(1);
+  }
+
+  // Suite selecionada que nao produziu caso algum tambem e falha de infraestrutura.
+  const comResultado = new Set([...(rel.regressoes || []), ...(rel.melhorias || []), ...(rel.novos || [])].map((c) => c.suite));
+  if (rel.executados === 0) {
+    console.log('\n=== VEREDITO DO GATE\n    REPROVADO: nenhum caso foi executado.');
+    process.exit(1);
+  }
+  void comResultado;
+
   // --- DECISAO 2: repete apenas as suites com regressao ---
   if (rel && rel.reprova) {
     const afetadas = new Set([
