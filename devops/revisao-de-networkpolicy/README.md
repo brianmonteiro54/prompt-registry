@@ -1,7 +1,7 @@
 ---
 nome: Revisão de NetworkPolicy
 descricao: Revisa uma networkpolicy contra um padrão de compliance e um mapa de serviços, devolvendo veredito, perguntas de verificação derivadas do padrão e apontamentos numerados com severidade
-versao: 1.0.0
+versao: 1.0.1
 tags: [kubernetes, networkpolicy, seguranca, revisao]
 inputs:
   - nome: politica
@@ -42,3 +42,8 @@ O veredito é função declarada dos apontamentos: BARRADO se houver bloqueador,
 - É sem estado: não recebe as recusas de rodadas anteriores, então reapresenta apontamento já discutido com número novo. Quem mede convergência do ciclo é a pessoa que o orquestra.
 - Pendência conhecida (v1.0.1): não recebe o manifesto de origem, o que torna a categoria de cobertura de escopo estruturalmente incompleta — ele não detecta que o gerador estreitou o escopo se o estreitamento for coerente com o padrão. A correção é um parâmetro opcional para o manifesto original.
 - Rodar o revisor no mesmo modelo e na mesma sessão do gerador reduz o valor da separação. Na execução registrada isso produziu um apontamento falso positivo sobre forma de seletor. Recomendado rodar em modelo diferente ou em sessão limpa.
+
+## Histórico de versões
+
+- **1.0.1** — correção de uma frase truncada na regra de severidade da seção 6, que dizia "não promova apontamento de forma a bloqueador" e ficou sem sentido por faltar o nível de origem. Passou a ler "de MENOR ou IMPORTANTE a BLOQUEADOR". É regra operacional e não prosa: ela é o que impede o revisor de inflar severidade para parecer rigoroso, e o Checkpoint 06 credita a ela a convergência do veredito. Nenhuma outra alteração no prompt.
+- **1.0.0** — versão executada e registrada no Checkpoint 06.

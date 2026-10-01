@@ -1,7 +1,7 @@
 ---
 nome: Revisão de NetworkPolicy
 descricao: Revisa uma networkpolicy contra um padrão de compliance e um mapa de serviços, devolvendo veredito, perguntas de verificação derivadas do padrão e apontamentos numerados com severidade
-versao: 1.0.0
+versao: 1.0.1
 tags: [kubernetes, networkpolicy, seguranca, revisao]
 inputs:
   - nome: politica
@@ -53,7 +53,7 @@ A severidade é decidida pelo efeito, nunca pela dificuldade de corrigir. Aponta
 
 # 6. APROVAR E UM RESULTADO POSSIVEL
 
-Se nenhum apontamento bloqueador for encontrado, diga isso de forma explícita e declare o manifesto aprovado com as ressalvas restantes. Não invente bloqueador para parecer rigoroso e não promova apontamento de forma a bloqueador. Revisor que sempre barra é tão inútil quanto revisor que sempre aprova.
+Se nenhum apontamento bloqueador for encontrado, diga isso de forma explícita e declare o manifesto aprovado com as ressalvas restantes. Não invente bloqueador para parecer rigoroso e não promova apontamento de MENOR ou IMPORTANTE a BLOQUEADOR. Revisor que sempre barra é tão inútil quanto revisor que sempre aprova.
 
 O veredito é função dos apontamentos e não pode contradizê-los:
 
