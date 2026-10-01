@@ -144,7 +144,7 @@ jobs:
       # de latencia passariam sem medir nada. Este cache e do pacote e dos metadados da
       # ferramenta, nao das respostas de modelo.
       - name: Cache do promptfoo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/promptfoo
           key: ${{ runner.os }}-promptfoo-v1
