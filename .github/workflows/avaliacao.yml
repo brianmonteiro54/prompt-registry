@@ -90,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.22'
           cache: 'npm'
@@ -132,7 +132,7 @@ jobs:
           # Precisa do historico para comparar com a base e descobrir o que mudou.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.22'
           cache: 'npm'
