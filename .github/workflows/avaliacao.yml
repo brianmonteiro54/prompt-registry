@@ -88,7 +88,7 @@ jobs:
     name: Estrutura do catalogo
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v4
         with:
@@ -127,7 +127,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Precisa do historico para comparar com a base e descobrir o que mudou.
           fetch-depth: 0
