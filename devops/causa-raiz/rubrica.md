@@ -67,9 +67,14 @@ que separa investigação de descrição.
 
 | Nota | Condição |
 |:---:|---|
-| **2** | Classifica a queda do cache de busca como EFEITO, e não como causa. Descarta a hipótese de pico de leitura pelo argumento correto: o gargalo está na fila de escrita, não na de busca. Cada sinal da tabela recebe papel coerente com a sua posição no tempo. |
-| **1** | Classifica a maioria dos sinais corretamente mas erra o papel de um deles, ou descarta a hipótese concorrente sem apresentar a evidência que a derruba. |
+| **2** | As três condições: (a) classifica a queda do cache de busca como EFEITO e não como causa; (b) apresenta hipótese concorrente e a descarta com evidência dos artefatos — **qualquer argumento tecnicamente correto serve**, seja apontar que o gargalo está na fila de escrita e não na de busca, seja mostrar por precedência temporal que a busca degrada depois da saturação de memória; (c) cada sinal recebe papel coerente com a sua posição no tempo. |
+| **1** | Classifica a maioria dos sinais corretamente mas erra o papel de um deles, ou descarta a hipótese concorrente sem apoiar o descarte em evidência dos artefatos. |
 | **0** | Trata a queda do cache ou a lentidão de busca como causa, ou lista sinais sem atribuir papel, ou não apresenta hipótese concorrente alguma. |
+
+> A condição (b) exigia, numa versão anterior, **um** argumento específico — o da fila de
+> escrita. O gate reprovou uma análise que descartou a hipótese por precedência temporal,
+> que é raciocínio igualmente válido, e a rubrica foi corrigida: era sobreajuste aos dois
+> exemplos de calibração. Registrado no Checkpoint 09.
 
 ## Critério 3 — Ação proporcional
 
