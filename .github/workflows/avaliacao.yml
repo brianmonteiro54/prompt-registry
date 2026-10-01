@@ -117,12 +117,24 @@ jobs:
   # aos segredos, e este repositorio executa codigo do PR (`prompt.js`, `asserts.js`,
   # `aplicar-corte.js`). Um PR malicioso exfiltraria as duas chaves de API. Fork
   # contribui com o job de estrutura e um mantenedor roda a avaliacao completa.
+  #
+  # DEPENDABOT TAMBEM E PULADO, e isso foi descoberto na pratica e nao por leitura de
+  # documentacao. Os PRs do Dependabot vem do PROPRIO repositorio, entao a condicao de
+  # fork nao os pega — mas workflow disparado pelo Dependabot roda com escopo de segredo
+  # separado e nao recebe os segredos de Actions. O efeito observado na primeira execucao
+  # foi exatamente o modo de falha que este pipeline nao pode ter: as 9 suites falharam
+  # por falta de chave e o PR recebeu check verde, porque o gate ainda era fail-open.
+  # Com o gate fechado, o Dependabot passaria a reprovar todo PR de bump de versao.
+  # Entao ele e tratado como fork: estrutura sim, avaliacao paga nao.
   # ===================================================================================
   avaliacao:
     name: Suites de avaliacao
     runs-on: ubuntu-latest
     needs: estrutura
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     permissions:
       contents: read
       pull-requests: write
