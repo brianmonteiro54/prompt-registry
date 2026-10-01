@@ -88,9 +88,9 @@ jobs:
     name: Estrutura do catalogo
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.22'
           cache: 'npm'
@@ -127,12 +127,12 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # Precisa do historico para comparar com a base e descobrir o que mudou.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22.22'
           cache: 'npm'
@@ -144,7 +144,7 @@ jobs:
       # de latencia passariam sem medir nada. Este cache e do pacote e dos metadados da
       # ferramenta, nao das respostas de modelo.
       - name: Cache do promptfoo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/promptfoo
           key: ${{ runner.os }}-promptfoo-v1
@@ -208,7 +208,7 @@ jobs:
       # que a informacao importa. Padrao adotado da action oficial.
       - name: Comentar o resultado no pull request
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -230,7 +230,7 @@ jobs:
 
       - name: Guardar as saidas das evals
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: saidas-das-evals
           path: ${{ runner.temp }}/avaliacao/*.json
