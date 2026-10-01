@@ -1,0 +1,225 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de `plano-de-migracao-faseado` — elo 2 da cadeia do Checkpoint 05.
+#
+# A entrada e a saida REGISTRADA do elo 1, em `casos/forge/diagnostico.txt`, e nao um
+# diagnostico sintetico. Isso e o que torna a suite um teste de CADEIA e nao de prompt
+# isolado: se o contrato de encaixe entre os elos quebrar, quebra aqui.
+#
+# E o diagnostico herdado contem um erro real, deliberadamente preservado: ele classifica
+# a ingestao e a gravacao no DW como EXIGE LOTE COMPLETO com critérios que descrevem a
+# implementacao atual ("depende de agendamento cron"), nao uma restricao inerente. O
+# Checkpoint 05 repassou esse erro de proposito e o elo 2 o pegou, declarando a
+# discordancia. Isso virou o assert mais valioso desta suite: a cadeia tem que se
+# autocorrigir COM RASTRO, e nao em silencio.
+#
+# > Ressalva de fidelidade: o diagnostico foi extraido do Checkpoint 05, onde os titulos
+# > de secao estavam em negrito markdown pela transcricao. Normalizei para a forma literal
+# > em maiusculas que o prompt do elo 1 especifica. Nenhum valor ou classificacao mudou.
+
+description: Plano faseado de migracao do Forge a partir do diagnostico do elo 1
+
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: plano-de-migracao-faseado
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 2048
+
+tests:
+  - description: Plano derivado do diagnostico registrado do elo 1
+    vars:
+      diagnostico: file://casos/forge/diagnostico.txt
+      requisitos: file://casos/forge/requisitos.txt
+    assert:
+      # --- 1. Os seis titulos literais, na ordem ---
+      - type: javascript
+        value: |
+          const ordem = ['PREMISSAS HERDADAS DO DIAGNOSTICO', 'DISCORDANCIAS DO DIAGNOSTICO',
+                         'FASES', 'ORDEM E JUSTIFICATIVA', 'FORA DE ESCOPO', 'LACUNAS'];
+          const pos = ordem.map((t) => output.indexOf(t));
+          const faltando = ordem.filter((_, i) => pos[i] < 0);
+          if (faltando.length > 0) {
+            return { pass: false, score: 0, reason: `secoes ausentes: ${faltando.join(', ')}` };
+          }
+          for (let i = 1; i < pos.length; i++) {
+            if (pos[i] < pos[i - 1]) {
+              return { pass: false, score: 0, reason: `"${ordem[i]}" aparece antes de "${ordem[i - 1]}"` };
+            }
+          }
+          return true;
+
+      # --- 2. Nada de big-bang: ao menos duas fases ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASES')[1] || '').split('ORDEM E JUSTIFICATIVA')[0] || '';
+          const fases = (bloco.match(/Fase\s*\d/gi) || []);
+          const distintas = new Set(fases.map((f) => f.replace(/\s+/g, '').toLowerCase()));
+          return distintas.size >= 2
+            ? true
+            : { pass: false, score: 0, reason: `${distintas.size} fase(s) declarada(s); o requisito proibe virada unica e exige passos` };
+
+      # --- 3. Cada fase declara ponto de reversao ---
+      # Requisito 4 do prompt: reversao independente de desfazer as anteriores. Plano sem
+      # ponto de reversao por fase e plano que so anda para frente.
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASES')[1] || '').split('ORDEM E JUSTIFICATIVA')[0] || '';
+          const nFases = new Set((bloco.match(/Fase\s*\d/gi) || []).map((f) => f.replace(/\s+/g, '').toLowerCase())).size;
+          const nReversoes = (bloco.match(/ponto de revers[aã]o/gi) || []).length;
+          return nReversoes >= nFases
+            ? true
+            : { pass: false, score: 0, reason: `${nFases} fase(s) e apenas ${nReversoes} ponto(s) de reversao declarado(s)` };
+
+      # --- 4. Cada fase declara dependencia de lacuna ---
+      # Etapa 3 do prompt, e o modo de falha que ele chama de mais grave: planejar sobre
+      # lacuna como se ela estivesse resolvida produz plano que parece solido.
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASES')[1] || '').split('ORDEM E JUSTIFICATIVA')[0] || '';
+          const nFases = new Set((bloco.match(/Fase\s*\d/gi) || []).map((f) => f.replace(/\s+/g, '').toLowerCase())).size;
+          const nDeps = (bloco.match(/depende de lacuna/gi) || []).length;
+          return nDeps >= nFases
+            ? true
+            : { pass: false, score: 0, reason: `${nFases} fase(s) e apenas ${nDeps} declaracao(oes) de "Depende de lacuna"` };
+
+      # --- 5. RASTREABILIDADE: nomes de consumidor vem literais do diagnostico ---
+      # Etapa 2 do prompt exige os mesmos nomes, sem abreviar nem renomear, para a
+      # rastreabilidade entre os documentos nao se perder. E a propriedade que justifica
+      # a cadeia existir em vez de um prompt monolitico.
+      - type: javascript
+        value: |
+          const esperados = ['Sentinel', 'Cerebro', 'Pepper'];
+          const faltando = esperados.filter((c) => !new RegExp(c, 'i').test(output));
+          return faltando.length === 0
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `consumidor(es) do diagnostico ausente(s) do plano: ${faltando.join(', ')}; a rastreabilidade entre os elos se perde`,
+              };
+
+      # --- 6. A cadeia tem que se autocorrigir COM RASTRO ---
+      # O diagnostico herdado classifica ingestao e gravacao no DW como EXIGE LOTE
+      # COMPLETO por critério que descreve a implementacao atual ("depende de agendamento
+      # cron", "particionamento por hora"), e nao uma restricao inerente. O requisito
+      # numero um da migracao e justamente consumir continuamente do Relay — ou seja, a
+      # classificacao herdada CONTRADIZ o requisito principal.
+      #
+      # Os dois desfechos ruins: herdar em silencio (cascata de erro, e o plano se apoia
+      # em premissa que contraria o proprio objetivo) ou corrigir sem declarar (perde o
+      # rastro, que e a unica vantagem da cadeia sobre um prompt monolitico). A secao de
+      # discordancias existe para esse caso.
+      #
+      # ESTE ASSERT REPROVA OS DOIS PROVIDERS, e e achado e nao bug. O Checkpoint 05
+      # registrou uma execucao em que o elo 2 pegou o erro e declarou a discordancia, e
+      # concluiu dali que "a cadeia se autocorrige com rastro". Medido agora em dois
+      # fornecedores, nao reproduz: os dois escrevem "Nenhuma". A conclusao do CP05 vinha
+      # de uma observacao unica, e esta suite mostra que a autocorrecao e possivel, nao
+      # confiavel. Registrado no Checkpoint 10 como pendencia v1.0.1 do prompt.
+      - type: javascript
+        value: |
+          const bloco = (output.split('DISCORDANCIAS DO DIAGNOSTICO')[1] || '').split('FASES')[0] || '';
+          const texto = bloco.trim();
+          const semDiscordancia = /^[-*\s\[]*nenhuma\b/i.test(texto);
+          if (semDiscordancia) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `declarou "${texto.slice(0, 50)}", mas o diagnostico herdado classifica a ingestao como EXIGE LOTE COMPLETO por critério de implementacao atual, contrariando o requisito de consumo continuo`,
+            };
+          }
+          if (texto.length < 60) {
+            return { pass: false, score: 0, reason: `secao de discordancias com ${texto.length} caracteres; sem justificativa verificavel` };
+          }
+          const citouOTema = /ingest|grava|lote completo|cron/i.test(texto);
+          return citouOTema
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: 'declarou discordancia mas nao sobre a classificacao de ingestao/gravacao, que e o erro presente no diagnostico herdado',
+              };
+
+      # --- 6b. Nao reproduzir os marcadores entre colchetes do modelo de saida ---
+      # Regra explicita de saida do prompt. Encontrado na pratica: um provider escreveu
+      # literalmente `[Nenhuma]`, copiando o marcador do gabarito em vez de preenche-lo.
+      # Saida com marcador vaza o modelo do prompt para quem le o documento.
+      #
+      # A primeira versao deste assert usava uma alternancia de letras soltas
+      # (`N|X|Y|Z|A|B|C`) seguida de `[^\]]*`, e com isso casava qualquer palavra entre
+      # colchetes comecando por aquelas letras. Reprovou `[BLOQUEADA]`, que NAO e vazamento
+      # de marcador: o proprio modelo de saida manda "marcar BLOQUEADA quando aplicavel",
+      # entao escrever `[BLOQUEADA]` e cumprir a regra. Marcador de uma letra agora tem que
+      # casar o conteudo inteiro entre colchetes.
+      - type: javascript
+        value: |
+          const MARCADORES = [
+            /\[(N|X|Y|Z|A|B|C)\]/,
+            /\[Nenhuma\]/i,
+            /\[Nome\]/i,
+            /\[Premissa ou acoplamento herdado[^\]]*\]/i,
+            /\[Item faltante\]/i,
+            /\[Qual dado[^\]]*\]/i,
+            /\[O que esta migra[^\]]*\]/i,
+            /\[nome da lacuna[^\]]*\]/i,
+          ];
+          for (const re of MARCADORES) {
+            const m = output.match(re);
+            if (m) {
+              return { pass: false, score: 0, reason: `reproduziu marcador do modelo de saida: "${m[0].slice(0, 60)}"` };
+            }
+          }
+          return true;
+
+      # --- 7. Fase 1 nao toca o caminho produtivo ---
+      # Etapa 5 do prompt: a fase 1 foca em observabilidade e comparacao.
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASES')[1] || '').split('ORDEM E JUSTIFICATIVA')[0] || '';
+          const inicio = bloco.search(/Fase\s*1/i);
+          if (inicio < 0) return { pass: false, score: 0, reason: 'nao ha Fase 1 declarada' };
+          const proxima = bloco.slice(inicio + 4).search(/Fase\s*2/i);
+          const fase1 = proxima >= 0 ? bloco.slice(inicio, inicio + 4 + proxima) : bloco.slice(inicio);
+          return /sombra|paralel|observabilidade|compara|shadow|dupla/i.test(fase1)
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: 'a Fase 1 nao e de observabilidade/comparacao sem alterar o caminho produtivo, como a etapa 5 exige',
+              };
+
+      # --- 8. Minimo de 3 lacunas ---
+      - type: javascript
+        value: |
+          const bloco = output.split('LACUNAS').pop() || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*]\s*\S/.test(l));
+          return itens.length >= 3
+            ? true
+            : { pass: false, score: 0, reason: `${itens.length} lacuna(s) declarada(s); o prompt exige minimo de 3` };
+
+      # --- 9. Teto de 70 linhas ---
+      - type: javascript
+        value: |
+          const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+          return linhas.length <= 70
+            ? true
+            : { pass: false, score: 0, reason: `${linhas.length} linhas; o teto declarado e 70` };
+
+      # --- Limites operacionais ---
+      - type: latency
+        threshold: 30000
+      - type: cost
+        threshold: 0.05

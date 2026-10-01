@@ -1,0 +1,103 @@
+# PREMISSA DE MECANISMO: o mapa de servicos informa o NOME de cada namespace, mas nao
+# informa label de namespace. A selecao entre namespaces depende de label, entao esta
+# politica assume o label padrao `kubernetes.io/metadata.name` igual ao nome do namespace,
+# presente por padrao em clusters Kubernetes 1.21 ou superior. Se o cluster for anterior a
+# 1.21 ou tiver esse label desabilitado, os seletores de origem e destino nao casam.
+#
+# PREMISSA DE MECANISMO: assume-se CNI stateful, de modo que o trafego de resposta de
+# conexoes iniciadas legitimamente e permitido sem regra no sentido oposto.
+#
+# LACUNA DECLARADA: o mapa de servicos nao informa a porta de escuta do Sentinel, entao as
+# regras de ingress abaixo nao restringem porta. Fechar essa lacuna exige a porta do
+# servico do Sentinel.
+---
+# Objeto 1 de 2 — negacao padrao explicita do namespace.
+# Cobre TODOS os pods de sentinel-prod e nao concede permissao nenhuma. Pod novo que
+# suba no namespace ja nasce isolado, em vez de nascer sem politica aplicavel.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-default-deny
+  namespace: sentinel-prod
+spec:
+  podSelector:
+    matchExpressions: []
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# Objeto 2 de 2 — liberacoes dos fluxos legitimos do Sentinel.
+# Escopo restrito aos pods do Sentinel (app=sentinel), e nao ao namespace inteiro: as
+# permissoes abaixo valem para o Sentinel e nao para qualquer vizinho de namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-allow
+  namespace: sentinel-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: sentinel
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Origem: Relay (relay-prod, app=relay). Destino: Sentinel. Fluxo: consumo de eventos.
+    # Porta nao informada no mapa de servicos; ver LACUNA DECLARADA no cabecalho.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: relay-prod
+          podSelector:
+            matchLabels:
+              app: relay
+    # Origem: API gateway (edge, app=api-gateway). Destino: Sentinel. Fluxo: requisicoes
+    # da plataforma. Porta nao informada no mapa de servicos.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge
+          podSelector:
+            matchLabels:
+              app: api-gateway
+  egress:
+    # Origem: Sentinel. Destino: Forge (forge-prod, app=forge) na 5432/TCP.
+    # Fluxo: consulta ao warehouse Postgres. Porta vinda do mapa de servicos.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forge-prod
+          podSelector:
+            matchLabels:
+              app: forge
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Origem: Sentinel. Destino: Cerebro (cerebro-prod, app=cerebro) na 9200/TCP.
+    # Fluxo: busca no Elasticsearch. Porta vinda do mapa de servicos.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cerebro-prod
+          podSelector:
+            matchLabels:
+              app: cerebro
+      ports:
+        - protocol: TCP
+          port: 9200
+    # Origem: Sentinel. Destino: DNS interno (kube-system, k8s-app=kube-dns) na 53.
+    # Fluxo: resolucao de nomes. Os dois protocolos de transporte estao liberados porque
+    # resolucao DNS usa UDP por padrao e recorre a TCP em resposta grande ou transferencia
+    # de zona; liberar so UDP produz falha intermitente em parte das consultas.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

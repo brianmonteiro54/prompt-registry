@@ -1,0 +1,260 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de `detalhamento-de-fase` — elo 3 da cadeia do Checkpoint 05.
+#
+# A entrada e a saida REGISTRADA do elo 2, fechando o teste da cadeia inteira: elo 1 ->
+# elo 2 -> elo 3, cada um recebendo o artefato real do anterior.
+#
+# O assert central e o da REVERSAO HONESTA. A etapa 5 do prompt diz que toda reversao
+# perde algo e que reversao sem declarar a perda e "reversao fantasiosa". A fase 1 e
+# justamente a armadilha: desligar um pipeline sombra nao afeta producao nenhuma, entao a
+# resposta facil e "nao se perde nada" — quando o que se perde e o relogio das 48 horas
+# de paridade, que e o criterio de avanco da fase. O Checkpoint 05 registrou o modelo
+# caindo em metade dessa armadilha.
+#
+# Dois casos: a fase que existe no plano, e uma fase que NAO existe. O segundo testa a
+# etapa 1 (recusar explicitamente e dizer quais fases existem), que e o comportamento que
+# impede o elo 3 de inventar plano quando recebe entrada errada.
+
+description: Detalhamento executavel de uma fase do plano de migracao do Forge
+
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: detalhamento-de-fase
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 2048
+
+defaultTest:
+  vars:
+    plano: file://casos/forge/plano.txt
+    requisitos: file://casos/forge/requisitos.txt
+
+tests:
+  # =========================================================================
+  - description: Fase 1 do plano registrado — detalhamento executavel
+    vars:
+      fase_escolhida: file://casos/forge/fase_escolhida.txt
+    assert:
+      # --- 1. Os sete titulos literais, na ordem ---
+      - type: javascript
+        value: |
+          const ordem = ['FASE DETALHADA', 'PRE-CONDICOES', 'PASSOS', 'VALIDACAO DA FASE',
+                         'REVERSAO', 'CRITERIOS DE ABORTO', 'LACUNAS'];
+          const pos = ordem.map((t) => output.indexOf(t));
+          const faltando = ordem.filter((_, i) => pos[i] < 0);
+          if (faltando.length > 0) {
+            return { pass: false, score: 0, reason: `secoes ausentes: ${faltando.join(', ')}` };
+          }
+          for (let i = 1; i < pos.length; i++) {
+            if (pos[i] < pos[i - 1]) {
+              return { pass: false, score: 0, reason: `"${ordem[i]}" aparece antes de "${ordem[i - 1]}"` };
+            }
+          }
+          return true;
+
+      # --- 2. Identifica a fase escolhida e copia o critério de avanco do plano ---
+      # Etapa 3: o critério proposto e o critério do plano precisam ser a mesma coisa, e
+      # divergencia tem que ser declarada em vez de substituida em silencio.
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASE DETALHADA')[1] || '').split('PRE-CONDICOES')[0] || '';
+          // `Fase escolhida: 1 - Observabilidade...` e identificacao correta: a palavra
+          // "Fase" ja esta no rotulo do campo. A primeira versao deste assert exigia
+          // `Fase\s*1` e reprovava essa forma, que e a do proprio modelo de saida.
+          if (!/fase\s*escolhida\s*:?\s*(fase\s*)?1\b/i.test(bloco) && !/\bfase\s*1\b/i.test(bloco)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `a primeira secao nao identifica a Fase 1 como a fase detalhada; comeca com "${bloco.trim().slice(0, 80)}"`,
+            };
+          }
+          if (!/crit[eé]rio de avan[cç]o/i.test(bloco)) {
+            return { pass: false, score: 0, reason: 'nao copiou o critério de avanco que o plano declarou para a fase' };
+          }
+          if (!/diverg/i.test(bloco)) {
+            return { pass: false, score: 0, reason: 'nao declarou se ha divergencia entre o critério do plano e o critério proposto' };
+          }
+          // O critério do plano para a fase 1 e paridade por 48 horas continuas.
+          return /48\s*h|48\s*hor/i.test(bloco)
+            ? true
+            : { pass: false, score: 0, reason: 'o critério de avanco copiado nao menciona as 48 horas de paridade que o plano declarou' };
+
+      # --- 3. Passos numerados e com declaracao de reversibilidade isolada ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('PASSOS')[1] || '').split('VALIDACAO DA FASE')[0] || '';
+          const numerados = (bloco.match(/^\s*\d+[.)]/gm) || []).length;
+          if (numerados < 2) {
+            return { pass: false, score: 0, reason: `${numerados} passo(s) numerado(s); detalhamento executavel precisa de sequencia` };
+          }
+          const reversiveis = (bloco.match(/revers[ií]vel sozinho/gi) || []).length;
+          return reversiveis >= numerados
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `${numerados} passo(s) e apenas ${reversiveis} declaracao(oes) de "Reversivel sozinho"; sem isso nao se sabe ate onde da para voltar`,
+              };
+
+      # --- 4. Cada passo tem critério de verificacao ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('PASSOS')[1] || '').split('VALIDACAO DA FASE')[0] || '';
+          const numerados = (bloco.match(/^\s*\d+[.)]/gm) || []).length;
+          const verif = (bloco.match(/crit[eé]rio de verifica/gi) || []).length;
+          return verif >= numerados
+            ? true
+            : { pass: false, score: 0, reason: `${numerados} passo(s) e apenas ${verif} critério(s) de verificacao` };
+
+      # --- 5. REVERSAO HONESTA: declara o que se perde, e nao "nada" ---
+      # Etapa 5 do prompt. Este e o assert que a armadilha da fase 1 exige.
+      - type: javascript
+        value: |
+          const bloco = (output.split('REVERSAO')[1] || '').split('CRITERIOS DE ABORTO')[0] || '';
+          if (!/o que se perde/i.test(bloco)) {
+            return { pass: false, score: 0, reason: 'a secao REVERSAO nao traz o campo "O que se perde"' };
+          }
+          const m = bloco.match(/o que se perde\s*:?\s*([^\n]*)/i);
+          const perda = (m && m[1] ? m[1] : '').trim();
+          if (perda.length < 10) {
+            return { pass: false, score: 0, reason: `campo "O que se perde" praticamente vazio: "${perda}"` };
+          }
+          if (/^(nada|nenhum|nenhuma|zero)\b/i.test(perda)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `declarou que a reversao nao perde nada ("${perda.slice(0, 60)}"); a etapa 5 chama isso de reversao fantasiosa`,
+            };
+          }
+          if (!/janela de revers/i.test(bloco)) {
+            return { pass: false, score: 0, reason: 'a secao REVERSAO nao declara a janela de reversao' };
+          }
+          return true;
+
+      # --- 6. Criterios de aborto tem condicao numerica ---
+      # O prompt pede condicao numerica observavel. Sem numero, "abortar se houver
+      # impacto" nao e acionavel por quem esta executando as 3 da manha.
+      - type: javascript
+        value: |
+          const bloco = (output.split('CRITERIOS DE ABORTO')[1] || '').split('LACUNAS')[0] || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*\d]/.test(l) && l.trim().length > 5);
+          if (itens.length === 0) {
+            return { pass: false, score: 0, reason: 'nenhum critério de aborto declarado' };
+          }
+          const comNumero = itens.filter((l) => /\d/.test(l));
+          return comNumero.length >= 1
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `${itens.length} critério(s) de aborto e nenhum com condicao numerica; o prompt exige condicao numerica observavel`,
+              };
+
+      # --- 7. Minimo de 2 lacunas ---
+      - type: javascript
+        value: |
+          const bloco = output.split('LACUNAS').pop() || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*]\s*\S/.test(l));
+          return itens.length >= 2
+            ? true
+            : { pass: false, score: 0, reason: `${itens.length} lacuna(s) declarada(s); este prompt exige minimo de 2` };
+
+      # --- 8. Teto de 70 linhas ---
+      - type: javascript
+        value: |
+          const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+          return linhas.length <= 70
+            ? true
+            : { pass: false, score: 0, reason: `${linhas.length} linhas; o teto declarado e 70` };
+
+      - type: latency
+        threshold: 30000
+      - type: cost
+        threshold: 0.05
+
+  # =========================================================================
+  - description: Fase inexistente — tem que recusar e listar as fases do plano
+    vars:
+      fase_escolhida: 'Fase 7 - Desativacao do Relay'
+    assert:
+      # Etapa 1 do prompt: se a fase nao existe no plano, recusar explicitamente e dizer
+      # quais fases existem. Sem isso, o elo 3 inventa plano a partir de entrada errada —
+      # e numa cadeia de prompts entrada errada e o caso comum, nao o excepcional.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          const recusou = /n[aã]o (existe|consta|foi encontrada)|inexistente|n[aã]o localizada|recuso|n[aã]o h[aá] fase/.test(t);
+          if (!recusou) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `nao recusou a tarefa para uma fase ausente do plano; saida comeca com "${output.trim().slice(0, 100)}"`,
+            };
+          }
+          return true;
+      # E tem que dizer quais fases existem, para quem chamou poder corrigir.
+      - type: javascript
+        value: |
+          const fases = new Set((output.match(/Fase\s*[123]\b/gi) || []).map((f) => f.replace(/\s+/g, '').toLowerCase()));
+          return fases.size >= 2
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `recusou mas listou ${fases.size} fase(s) existente(s); a etapa 1 manda dizer quais fases existem`,
+              };
+      # NAO PODE INVENTAR O CRITERIO DE AVANCO DA FASE INEXISTENTE.
+      #
+      # Este e o assert que de fato separa recusa de fabricacao, e ele substituiu um
+      # anterior que contava passos numerados na secao PASSOS. O anterior estava errado:
+      # o formato de saida do prompt exige as SETE secoes sempre, inclusive PASSOS, de
+      # modo que uma recusa correta ainda precisa escrever algo ali. Um provider recusou
+      # certo e escreveu "1. Acao: Recusa de detalhamento tecnico por inconsistencia de
+      # escopo", e o assert antigo reprovava isso — ou seja, penalizava o cumprimento de
+      # outra regra do mesmo prompt.
+      #
+      # (A tensao entre a regra 1, que manda recusar, e o formato, que exige as sete
+      # secoes, e defeito do prompt e virou pendencia v1.0.1: falta dizer o que vai nas
+      # secoes de execucao quando a fase nao existe.)
+      #
+      # O discriminador real e o critério de avanco. A fase 7 nao existe, logo nao existe
+      # critério de avanco dela no plano. Quem escreve um ali esta fabricando insumo:
+      # um provider inventou "Garantir que todos os consumidores estejam operando com o
+      # fluxo continuo sem dependencia do Relay", frase que nao aparece em lugar nenhum
+      # do plano recebido.
+      - type: javascript
+        value: |
+          const bloco = (output.split('FASE DETALHADA')[1] || '').split('PRE-CONDICOES')[0] || '';
+          const m = bloco.match(/crit[eé]rio de avan[cç]o[^:]*:\s*([^\n.]*)/i);
+          if (!m) return true;
+          const declarado = m[1].trim();
+          // `N/A`, `-` e vazio tambem reconhecem a ausencia. A primeira versao deste
+          // assert nao os aceitava e reprovou uma recusa correta que escreveu "N/A".
+          const reconheceAusencia =
+            declarado === '' ||
+            /^[-—–]$/.test(declarado) ||
+            /n\s*\/\s*a|inexistente|n[aã]o consta|n[aã]o existe|ausente|n[aã]o localizad|n[aã]o h[aá]|nenhum|n[aã]o aplic|recusa/i.test(declarado);
+          return reconheceAusencia
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `fabricou critério de avanco para uma fase que nao existe no plano: "${declarado.slice(0, 110)}"`,
+              };
+      - type: latency
+        threshold: 30000
+      - type: cost
+        threshold: 0.05

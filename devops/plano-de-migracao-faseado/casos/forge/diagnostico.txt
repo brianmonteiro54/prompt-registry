@@ -1,0 +1,39 @@
+CONTRATO POR CONSUMIDOR
+
+| Consumidor | O que consome | Periodicidade | Garantia implícita | O que muda no modelo contínuo |
+|---|---|---|---|---|
+| Sentinel | Tabelas agregadas do Forge | A cada 60min (após o job batch) | Completude e atomicidade por partição horária | Passa a receber atualizações parciais contínuas, perdendo a garantia de janela fechada |
+| Cerebro | Eventos transformados | A cada 60min (após o job batch) | Ordem e fechamento de lote para reindexação | Recebe eventos fragmentados no tempo, impactando a lógica de indexação em lote |
+| Pepper | Relatórios de billing | De madrugada (diário/lote) | Fechamento contábil consolidado da janela | Deixa de encontrar uma base estática e passa a lidar com fluxo contínuo de registros |
+
+ETAPAS POR INCREMENTALIDADE
+
+| Etapa ou Grupo | Classificação | Critério Usado |
+|---|---|---|
+| Ingestão (forge-batch-ingest) | EXIGE LOTE COMPLETO | Depende de agendamento cron e leitura fechada de intervalo |
+| Transformação Spark (14 etapas) | INDETERMINADO | Insumos não detalham se há operações de agregação global ou janela móvel |
+| Gravação no DW | EXIGE LOTE COMPLETO | Particionamento por hora exige escrita atômica por janela fechada |
+
+ACOPLAMENTOS CRITICOS
+
+- Acoplamento temporal entre o job de 60min e a leitura dos consumidores: O DW assume janelas
+  horárias fechadas; o modelo contínuo quebra essa barreira de tempo.
+- Acoplamento de resiliência por acumulação: Falhas no lote acumulam o dobro de volume no ciclo
+  seguinte, comportamento que precisa ser repensado com backpressure no streaming.
+
+RISCOS DA TRANSICAO
+
+| Risco | Consumidores atingidos | Visível ou Silencioso |
+|---|---|---|
+| Divergência de dados contábeis por leitura prematura | Pepper | Silencioso |
+| Alertas falsos por estado parcial de agregação | Sentinel | Visível |
+| Falhas de indexação por quebra de ordenação temporal | Cerebro | Visível |
+
+LACUNAS
+
+- Granularidade das 14 etapas do Spark: Necessário listar o código ou spec das transformações para
+  confirmar quais etapas exigem janelas globais (ex: distinct, join).
+- SLA de entrega dos consumidores: Necessário consultar contratos de tolerância a atraso para
+  Sentinel, Cerebro e Pepper.
+- Mecanismo de reprocessamento atual: Necessário insumo sobre como o pipeline lida hoje com
+  reprocessamento de dias anteriores.

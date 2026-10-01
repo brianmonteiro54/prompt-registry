@@ -1,0 +1,91 @@
+# CONFERENCIA DE PRESERVACAO: Primeira versao da politica. Nao ha apontamentos anteriores para preservar.
+#
+# PREMISSA DE MECANISMO: Esta politica assume que o CNI do cluster e stateful, ou seja, o trafego de resposta
+# para conexoes iniciadas legitimamente e permitido automaticamente, nao exigindo regras explicitas no sentido oposto.
+#
+# PREMISSA DE MECANISMO: A selecao de pods em namespaces diferentes depende de os namespaces de origem/destino
+# possuirem labels identificadores unicos. Como o mapa de servicos nao fornece os labels dos namespaces,
+# assume-se como premissa que cada namespace possui o label padrao "kubernetes.io/metadata.name" igual ao seu proprio nome.
+#
+# DERIVACAO DE FLUXOS: Todos os fluxos declarados nas REGRAS DO PADRAO foram mapeados para regras de Ingress ou Egress.
+# Nenhum fluxo do padrao ficou sem regra correspondente.
+#
+# COBERTURA DE ESCOPO: O podSelector abaixo usa a chave matchLabels sem valor para cobrir todos os pods do namespace
+# sentinel-prod, aplicando a eles a politica de isolamento (default-deny) sem conceder permissao ampla.
+# Esta forma sem chaves garante que nenhum pod fique sem politica aplicavel.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sentinel-allow
+  namespace: sentinel-prod
+spec:
+  podSelector:
+    matchLabels:
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Origem: Relay (relay-prod) -> Destino: Sentinel (sentinel-prod)
+    # Proposito: Permitir que o Sentinel consuma eventos enviados pelo Relay.
+    # Protocolo: TCP (Premissa: protocolo de transporte padrao para consumo de eventos/APIs).
+    # Porta: Nao informada no mapa de servicos para o Relay. Lacuna: Sem porta especificada, a regra libera todas as portas do Sentinel para esta origem.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: relay-prod
+          podSelector:
+            matchLabels:
+              app: relay
+    # Origem: API Gateway (edge) -> Destino: Sentinel (sentinel-prod)
+    # Proposito: Permitir que o gateway de API da plataforma envie requisicoes para o Sentinel.
+    # Protocolo: TCP (Premissa: protocolo de transporte padrao para trafego HTTP/API do gateway).
+    # Porta: Nao informada no mapa de servicos para o API Gateway. Lacuna: Sem porta especificada, a regra libera todas as portas do Sentinel para esta origem.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge
+          podSelector:
+            matchLabels:
+              app: api-gateway
+  egress:
+    # Origem: Sentinel (sentinel-prod) -> Destino: Forge (forge-prod)
+    # Proposito: Permitir conexao de saida do Sentinel para o banco de dados/warehouse Forge.
+    # Protocolo: TCP (Premissa: protocolo padrao para conexoes PostgreSQL/Forge na porta 5432).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: forge-prod
+          podSelector:
+            matchLabels:
+              app: forge
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Origem: Sentinel (sentinel-prod) -> Destino: Cerebro (cerebro-prod)
+    # Proposito: Permitir conexao de saida do Sentinel para o servico de busca Cerebro.
+    # Protocolo: TCP (Premissa: protocolo padrao para conexoes Elasticsearch/Cerebro na porta 9200).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cerebro-prod
+          podSelector:
+            matchLabels:
+              app: cerebro
+      ports:
+        - protocol: TCP
+          port: 9200
+    # Origem: Sentinel (sentinel-prod) -> Destino: DNS Interno (kube-system)
+    # Proposito: Permitir resolucao de nomes DNS internos do cluster.
+    # Protocolo: UDP e TCP (Premissa: resolucao DNS utiliza prioritariamente UDP, mas pode recorrer a TCP para respostas grandes).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

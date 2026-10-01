@@ -1,0 +1,176 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de `diagnostico-de-acoplamento` — elo 1 da cadeia do Checkpoint 05.
+#
+# O assert que carrega o peso aqui e o de ordenacao de risco: a etapa 4 do prompt manda
+# ordenar os riscos por raio de alcance com os SILENCIOSOS PRIMEIRO, e isso e verificavel
+# lendo a tabela. A regra existe porque dado errado que ninguem percebe e pior que alerta
+# falso que todos veem — no cenario do Forge, o risco silencioso e a divergencia contabil
+# nos relatorios de billing.
+#
+# Nenhum juiz aqui. O que este prompt produz e classificacao estruturada com vocabulario
+# fechado, e classificacao com vocabulario fechado se verifica por string.
+
+description: Diagnostico de acoplamento do Forge antes do plano de migracao
+
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: diagnostico-de-acoplamento
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 2048
+
+tests:
+  - description: Forge em lote horario com tres consumidores acoplados
+    vars:
+      estado_atual: file://casos/forge/estado_atual.txt
+      requisitos: file://casos/forge/requisitos.txt
+    assert:
+      # --- 1. Os cinco titulos literais, na ordem ---
+      - type: javascript
+        value: |
+          const ordem = ['CONTRATO POR CONSUMIDOR', 'ETAPAS POR INCREMENTALIDADE',
+                         'ACOPLAMENTOS CRITICOS', 'RISCOS DA TRANSICAO', 'LACUNAS'];
+          const pos = ordem.map((t) => output.indexOf(t));
+          const faltando = ordem.filter((_, i) => pos[i] < 0);
+          if (faltando.length > 0) {
+            return { pass: false, score: 0, reason: `secoes ausentes: ${faltando.join(', ')}` };
+          }
+          for (let i = 1; i < pos.length; i++) {
+            if (pos[i] < pos[i - 1]) {
+              return { pass: false, score: 0, reason: `"${ordem[i]}" aparece antes de "${ordem[i - 1]}"` };
+            }
+          }
+          return true;
+
+      # --- 2. Os tres consumidores do insumo, nenhum esquecido ---
+      # Esquecer um consumidor e a falha mais custosa deste elo: o plano do elo 2 deriva
+      # as fases desta tabela, e consumidor ausente aqui nao recebe plano de continuidade.
+      - type: javascript
+        value: |
+          const bloco = (output.split('CONTRATO POR CONSUMIDOR')[1] || '').split('ETAPAS POR INCREMENTALIDADE')[0] || '';
+          const esperados = ['Sentinel', 'Cerebro', 'Pepper'];
+          const faltando = esperados.filter((c) => !new RegExp(c, 'i').test(bloco));
+          return faltando.length === 0
+            ? true
+            : { pass: false, score: 0, reason: `consumidor(es) ausente(s) da tabela de contrato: ${faltando.join(', ')}` };
+
+      # --- 3. A tabela de contrato tem as cinco colunas e linha por consumidor ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('CONTRATO POR CONSUMIDOR')[1] || '').split('ETAPAS POR INCREMENTALIDADE')[0] || '';
+          const linhas = bloco.split('\n').filter((l) => (l.match(/\|/g) || []).length >= 5);
+          return linhas.length >= 5
+            ? true
+            : { pass: false, score: 0, reason: `tabela de contrato com ${linhas.length} linhas de 5+ colunas; esperado cabecalho, separador e 3 consumidores` };
+
+      # --- 4. Classificacao usa o vocabulario fechado da etapa 2 ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('ETAPAS POR INCREMENTALIDADE')[1] || '').split('ACOPLAMENTOS CRITICOS')[0] || '';
+          const permitidos = ['INCREMENTAL', 'EXIGE LOTE COMPLETO', 'INDETERMINADO'];
+          const achados = permitidos.filter((v) => bloco.includes(v));
+          if (achados.length === 0) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `nenhuma das classificacoes permitidas (${permitidos.join(' / ')}) aparece na tabela de etapas`,
+            };
+          }
+          return true;
+
+      # --- 5. As 14 etapas do Spark: INDETERMINADO e a unica resposta honesta ---
+      # O insumo declara "14 etapas de processamento encadeadas (em Spark), ~40min no
+      # total" e NAO descreve nenhuma delas. Sem saber se alguma faz agregacao global,
+      # deduplicacao ou janela movel, nao existe base para classificar o grupo como
+      # INCREMENTAL nem como EXIGE LOTE COMPLETO.
+      #
+      # A definicao de INDETERMINADO no proprio prompt e "insumos insuficientes", e a
+      # regra de saida exige que toda afirmacao esteja ancorada no insumo recebido.
+      # Classificar o grupo com confianca e fabricar classificacao — e e o tipo de erro
+      # que se propaga: o elo 2 deriva as fases desta tabela e planeja em cima dela.
+      - type: javascript
+        value: |
+          const bloco = (output.split('ETAPAS POR INCREMENTALIDADE')[1] || '').split('ACOPLAMENTOS CRITICOS')[0] || '';
+          const linhas = bloco.split('\n').filter((l) => (l.match(/\|/g) || []).length >= 3);
+          const transf = linhas.find((l) => /transforma|spark|14/i.test(l));
+          if (!transf) {
+            return {
+              pass: false,
+              score: 0,
+              reason: 'a tabela de etapas nao traz linha para as 14 etapas de transformacao em Spark declaradas no insumo',
+            };
+          }
+          if (/INDETERMINADO/.test(transf)) return true;
+          const classe = (transf.match(/INCREMENTAL|EXIGE LOTE COMPLETO/) || ['(sem classificacao)'])[0];
+          return {
+            pass: false,
+            score: 0,
+            reason: `classificou as 14 etapas do Spark como ${classe}, mas o insumo nao descreve nenhuma delas; sem base, a classificacao correta e INDETERMINADO`,
+          };
+
+      # --- 6. REGRA DE ORDENACAO: risco silencioso vem antes do visivel ---
+      # Etapa 4 do prompt. E o assert mais substantivo desta suite, porque verifica uma
+      # decisao de engenharia e nao a presenca de um rotulo.
+      - type: javascript
+        value: |
+          const bloco = (output.split('RISCOS DA TRANSICAO')[1] || '').split('LACUNAS')[0] || '';
+          const linhas = bloco.split('\n').filter((l) => (l.match(/\|/g) || []).length >= 3);
+          // descarta cabecalho e separador
+          const dados = linhas.filter((l) => !/^\s*\|[\s|:-]+\|?\s*$/.test(l) && !/Vis[ií]vel ou Silencioso/i.test(l));
+          if (dados.length < 2) {
+            return { pass: false, score: 0, reason: `tabela de riscos com ${dados.length} linha(s) de dados; esperado ao menos 2 para verificar a ordenacao` };
+          }
+          const classe = dados.map((l) => (/silencioso/i.test(l) ? 'S' : /vis[ií]vel/i.test(l) ? 'V' : '?'));
+          const primeiroVisivel = classe.indexOf('V');
+          const ultimoSilencioso = classe.lastIndexOf('S');
+          if (primeiroVisivel >= 0 && ultimoSilencioso > primeiroVisivel) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `risco silencioso na posicao ${ultimoSilencioso + 1} aparece depois de risco visivel na posicao ${primeiroVisivel + 1}; a etapa 4 manda silencioso primeiro`,
+            };
+          }
+          if (!classe.includes('S')) {
+            return {
+              pass: false,
+              score: 0,
+              reason: 'nenhum risco classificado como silencioso; a divergencia contabil no billing da Pepper e silenciosa por natureza',
+            };
+          }
+          return true;
+
+      # --- 7. Minimo de 3 lacunas ---
+      - type: javascript
+        value: |
+          const bloco = output.split('LACUNAS').pop() || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*]\s*\S/.test(l));
+          return itens.length >= 3
+            ? true
+            : { pass: false, score: 0, reason: `${itens.length} lacuna(s) declarada(s); o prompt exige minimo de 3` };
+
+      # --- 8. Teto de 70 linhas ---
+      - type: javascript
+        value: |
+          const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+          return linhas.length <= 70
+            ? true
+            : { pass: false, score: 0, reason: `${linhas.length} linhas; o teto declarado e 70` };
+
+      # --- Limites operacionais ---
+      - type: latency
+        threshold: 30000
+      - type: cost
+        threshold: 0.05

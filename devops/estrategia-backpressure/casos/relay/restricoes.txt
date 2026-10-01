@@ -1,0 +1,6 @@
+Restrições do time:
+- alerting do Sentinel não pode atrasar mais que 60s (SLA com cliente)
+- ingestão do Forge pode atrasar até 15min sem violar SLA
+- orçamento de infra do trimestre já está 8% acima do previsto
+- Steve Rogers lembra que o barramento antigo perdia mensagens sob pico,
+  e perda de telemetry é inaceitável para um produto de observabilidade

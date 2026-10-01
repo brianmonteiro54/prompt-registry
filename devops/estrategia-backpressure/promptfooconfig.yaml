@@ -1,0 +1,204 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de `estrategia-backpressure` (Checkpoint 04).
+#
+# Saida aberta, e ainda assim ha bastante a verificar sem juiz. A razao e que este prompt
+# nao pede opiniao: ele exige ARITMETICA explicita e ESTRUTURA DE DECISAO. Os dois sao
+# verificaveis.
+#
+# O que NAO esta aqui, de proposito: assert sobre o veredito do piso fisico contra o SLA
+# de 60s do Sentinel. A etapa 2 do proprio prompt alerta que "latencia de processamento
+# de um evento novo" e "tempo de drenagem de um volume acumulado" sao relogios
+# diferentes, e que compara-los produz conclusao errada com aparencia de rigor. Um assert
+# exigindo "declare o SLA violado" premiaria exatamente o erro que o prompt existe para
+# evitar. Verificar a conta, sim; verificar a conclusao que depende da distincao de
+# relogios, nao — essa e a parte que precisa de julgamento.
+
+description: Estrategia de backpressure para o Relay sob restricoes em conflito
+
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: estrategia-backpressure
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          # Ligado: este item depende de cadeia (tres contas encadeadas, classificacao de
+          # restricoes, avaliacao cruzada). Nao ha limite de 5s aqui.
+          thinkingBudget: 2048
+
+tests:
+  - description: Relay com pico de 320k msgs/s sobre capacidade de 180k
+    vars:
+      estado_atual: file://casos/relay/estado_atual.txt
+      restricoes: file://casos/relay/restricoes.txt
+      opcoes_candidatas: file://casos/relay/opcoes_candidatas.txt
+    assert:
+      # --- 1. Os oito titulos literais, na ordem ---
+      - type: javascript
+        value: |
+          const ordem = ['DIMENSAO DO PROBLEMA', 'RELOGIOS E RESTRICOES', 'OPCOES AVALIADAS',
+                         'MATRIZ OPCAO x RESTRICAO', 'OPCOES ELIMINADAS', 'RECOMENDACAO',
+                         'SENSIBILIDADE DA DECISAO', 'LACUNAS'];
+          const pos = ordem.map((t) => output.indexOf(t));
+          const faltando = ordem.filter((_, i) => pos[i] < 0);
+          if (faltando.length > 0) {
+            return { pass: false, score: 0, reason: `secoes ausentes: ${faltando.join(', ')}` };
+          }
+          for (let i = 1; i < pos.length; i++) {
+            if (pos[i] < pos[i - 1]) {
+              return { pass: false, score: 0, reason: `"${ordem[i]}" aparece antes de "${ordem[i - 1]}"` };
+            }
+          }
+          return true;
+
+      # --- 2. A aritmetica do deficit ---
+      # 320k - 180k = 140k msgs/s. E a primeira conta da etapa 1, e todo o resto da
+      # analise depende dela. Numero errado aqui invalida a recomendacao inteira.
+      - type: javascript
+        value: |
+          const bloco = (output.split('RELOGIOS E RESTRICOES')[0] || '');
+          // aceita 140k, 140.000, 140000, 140 mil
+          const achou = /140[\s.,]?0?0?0?\s*(k|mil)?/i.test(bloco.replace(/\./g, '.'));
+          return achou
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: 'a secao DIMENSAO DO PROBLEMA nao mostra o deficit de 140k msgs/s (320k de pico menos 180k de capacidade)',
+              };
+
+      # --- 3. O volume acumulado ---
+      # 140k msgs/s * 25min * 60s = 210M mensagens. E a conta onde o erro de fator 60
+      # entre segundo e minuto aparece, e o proprio prompt manda conferir ordem de
+      # magnitude por causa disso.
+      - type: javascript
+        value: |
+          const bloco = (output.split('RELOGIOS E RESTRICOES')[0] || '');
+          const achou = /210[\s.,]?0{0,3}[\s.,]?0{0,3}\s*(m|mi|milh|mil)?/i.test(bloco);
+          return achou
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: 'a secao DIMENSAO DO PROBLEMA nao mostra o volume acumulado de ~210M mensagens (140k/s x 25min x 60s)',
+              };
+
+      # --- 4. Avaliou as quatro opcoes recebidas E adicionou pelo menos uma nova ---
+      # Regra 5 do prompt: opcoes preenchidas devem ser avaliadas E acrescidas de ao menos
+      # UMA opcao tecnica nova. Um prompt que so repete a lista nao esta decidindo nada.
+      - type: javascript
+        value: |
+          const bloco = (output.split('OPCOES AVALIADAS')[1] || '').split('MATRIZ OPCAO')[0] || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*]\s*\S/.test(l) && /resolve/i.test(bloco));
+          const nomes = bloco.split('\n').filter((l) => /^\s*[-*]\s*[^:]{3,60}:/.test(l));
+          if (nomes.length < 2) {
+            return { pass: false, score: 0, reason: `apenas ${nomes.length} opcao(oes) avaliada(s); o prompt exige comparar caminhos` };
+          }
+          if (nomes.length > 5) {
+            return { pass: false, score: 0, reason: `${nomes.length} opcoes avaliadas; o teto declarado e 5` };
+          }
+          return true;
+
+      # --- 5. Regra anti-espantalho: toda opcao declara o que NAO resolve ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('OPCOES AVALIADAS')[1] || '').split('MATRIZ OPCAO')[0] || '';
+          const naoResolve = (bloco.match(/n[aã]o resolve/gi) || []).length;
+          const modoFalha = (bloco.match(/novo modo de falha/gi) || []).length;
+          if (naoResolve < 2 || modoFalha < 2) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `regra anti-espantalho cumprida parcialmente: ${naoResolve} "nao resolve" e ${modoFalha} "novo modo de falha" em opcoes avaliadas`,
+            };
+          }
+          return true;
+
+      # --- 6. A recomendacao nao e "tudo" ---
+      # Regra absoluta da etapa 8: combinacao que inclui tudo o que foi listado nao e
+      # decisao, e abdicacao de decisao. Teto de 3 partes.
+      - type: javascript
+        value: |
+          const bloco = (output.split('RECOMENDACAO')[1] || '').split('SENSIBILIDADE DA DECISAO')[0] || '';
+          if (bloco.trim().length < 30) {
+            return { pass: false, score: 0, reason: 'secao RECOMENDACAO vazia ou quase vazia' };
+          }
+          const partes = (bloco.match(/^\s*\d[.)]/gm) || []).length;
+          return partes <= 3
+            ? true
+            : { pass: false, score: 0, reason: `recomendacao com ${partes} partes numeradas; o teto declarado e 3` };
+
+      # --- 7. Perda de mensagem e restricao inviolavel ---
+      # O insumo diz, com nome e sobrenome, que perda de telemetry e inaceitavel. Descarte
+      # pode (e deve) ser avaliado e eliminado, mas nao pode estar na recomendacao.
+      #
+      # A PRIMEIRA VERSAO DESTE ASSERT ESTAVA ERRADA e reprovou uma saida correta: ela
+      # procurava a expressao "perda de telemetry" em qualquer lugar da recomendacao, e o
+      # modelo havia escrito "evita a perda de telemetry" — exatamente o comportamento
+      # desejado. Assert de proibicao por palavra-chave precisa olhar a POLARIDADE, senao
+      # reprova quem declara que nao faz a coisa proibida.
+      #
+      # A versao abaixo e heuristica, e o limite esta declarado: ela checa negacao numa
+      # janela antes da ocorrencia. Negacao distante ou construcao indireta escapa. Para
+      # este insumo e suficiente; a verificacao semantica geral exigiria juiz.
+      - type: javascript
+        value: |
+          const bloco = (output.split('RECOMENDACAO')[1] || '').split('SENSIBILIDADE DA DECISAO')[0] || '';
+          const PROIBIDO = /descart\w*|drop\b|perda de (mensagem|evento|telemetry|dados)/gi;
+          const NEGACAO = /(sem|evita\w*|impede|impedir|nenhuma|nao|não|n[aã]o h[aá]|zero|previne|preserv\w*|garante que n[aã]o)\s*$/i;
+          const acusacoes = [];
+          for (const m of bloco.matchAll(PROIBIDO)) {
+            const antes = bloco.slice(Math.max(0, m.index - 45), m.index);
+            if (!NEGACAO.test(antes.replace(/[^\p{L}\s]/gu, ' ').trimEnd() + ' ')) {
+              acusacoes.push(m[0]);
+            }
+          }
+          return acusacoes.length === 0
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: `a recomendacao parece propor descarte (${acusacoes.map((a) => `"${a}"`).join(', ')}) sem negacao proxima, e o insumo declara perda de telemetry como inaceitavel`,
+              };
+
+      # --- 8. Sensibilidade aponta para uma opcao concreta ---
+      - type: javascript
+        value: |
+          const bloco = (output.split('SENSIBILIDADE DA DECISAO')[1] || '').split('LACUNAS')[0] || '';
+          return bloco.trim().length >= 40
+            ? true
+            : { pass: false, score: 0, reason: 'SENSIBILIDADE DA DECISAO vazia ou sem conteudo util; o prompt proibe encurtar esta secao' };
+
+      # --- 9. Minimo de 3 lacunas ---
+      - type: javascript
+        value: |
+          const bloco = output.split('LACUNAS').pop() || '';
+          const itens = bloco.split('\n').filter((l) => /^\s*[-*]\s*\S/.test(l));
+          return itens.length >= 3
+            ? true
+            : { pass: false, score: 0, reason: `${itens.length} lacuna(s) declarada(s); o prompt exige minimo de 3` };
+
+      # --- 10. Teto de 90 linhas ---
+      - type: javascript
+        value: |
+          const linhas = output.trim().split('\n').filter((l) => l.trim() !== '');
+          return linhas.length <= 90
+            ? true
+            : { pass: false, score: 0, reason: `${linhas.length} linhas; o teto declarado e 90` };
+
+      # --- Limites operacionais ---
+      - type: latency
+        threshold: 30000
+      - type: cost
+        threshold: 0.05

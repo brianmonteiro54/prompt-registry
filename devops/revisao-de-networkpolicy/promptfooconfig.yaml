@@ -1,0 +1,284 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# Suite de `revisao-de-networkpolicy`, o revisor do par gerador/revisor do Checkpoint 06.
+#
+# Este e o prompt de saida aberta mais testavel do catalogo, e o motivo e que ele tem um
+# gabarito que nao depende de julgamento: dada a politica allow-all que a Natasha barrou,
+# existe UMA resposta certa para o veredito, e e BARRADO. Revisor que aprova allow-all
+# esta quebrado, e isso da para afirmar sem juiz.
+#
+# Dois casos, e o segundo e o que falta na maioria das suites de revisor:
+#   1. politica permissiva  -> tem que BARRAR e nomear o trafego indevido
+#   2. politica endurecida  -> NAO pode barrar
+#
+# O caso 2 testa a secao 6 do proprio prompt ("APROVAR E UM RESULTADO POSSIVEL").
+# Revisor que sempre barra passa no caso 1 e e tao inutil quanto revisor que sempre
+# aprova — o custo dele e o time parar de ler o parecer.
+
+description: Revisao de NetworkPolicy contra o padrao de compliance da Aegis
+
+evaluateOptions:
+  maxConcurrency: 1
+
+prompts:
+  - id: file://prompt.js
+    label: revisao-de-networkpolicy
+
+providers:
+  - id: openai:gpt-4o-mini
+    config:
+      temperature: 0
+      seed: 42
+  - id: google:gemini-3.5-flash
+    config:
+      temperature: 0
+      generationConfig:
+        thinkingConfig:
+          thinkingBudget: 0
+
+defaultTest:
+  vars:
+    regras_do_padrao: file://casos/sentinel/regras_do_padrao.txt
+    mapa_de_servicos: file://casos/sentinel/mapa_de_servicos.txt
+
+  assert:
+    # --- 1. Os cinco titulos literais, na ordem declarada na secao 8 ---
+    - type: contains
+      value: 'VEREDITO'
+    - type: contains
+      value: 'PERGUNTAS DE VERIFICACAO'
+    - type: contains
+      value: 'APONTAMENTOS'
+    - type: contains
+      value: 'TRAFEGO INDEVIDO PERMITIDO'
+    - type: contains
+      value: 'LACUNAS DA REVISAO'
+
+    # --- 2. As secoes vem na ordem, e isso importa para leitura ---
+    - type: javascript
+      value: |
+        const ordem = ['VEREDITO', 'PERGUNTAS DE VERIFICACAO', 'APONTAMENTOS',
+                       'TRAFEGO INDEVIDO PERMITIDO', 'LACUNAS DA REVISAO'];
+        const pos = ordem.map((t) => output.indexOf(t));
+        const faltando = ordem.filter((_, i) => pos[i] < 0);
+        if (faltando.length > 0) {
+          return { pass: false, score: 0, reason: `secoes ausentes: ${faltando.join(', ')}` };
+        }
+        for (let i = 1; i < pos.length; i++) {
+          if (pos[i] < pos[i - 1]) {
+            return { pass: false, score: 0, reason: `"${ordem[i]}" aparece antes de "${ordem[i - 1]}"` };
+          }
+        }
+        return true;
+
+    # --- 3. O revisor NAO corrige (secao 1 do prompt) ---
+    # Assert pela linha `apiVersion:`, que e o que todo manifesto corrigido carrega e que
+    # nenhum apontamento em prosa precisa escrever. Escolhido em vez de procurar nomes de
+    # campo (`podSelector`, `matchLabels`) porque apontamento legitimo CITA nome de campo
+    # ao localizar o problema — e a regra do prompt manda localizar por campo.
+    - type: javascript
+      value: |
+        const linhas = output.split('\n');
+        const manifesto = linhas.findIndex((l) => /^\s*apiVersion\s*:/.test(l));
+        if (manifesto >= 0) {
+          return {
+            pass: false,
+            score: 0,
+            reason: `revisor escreveu manifesto corrigido (linha ${manifesto + 1}: "${linhas[manifesto].trim()}"), e a secao 1 do prompt proibe`,
+          };
+        }
+        const cerca = /```ya?ml/i.test(output);
+        if (cerca) {
+          return { pass: false, score: 0, reason: 'revisor abriu bloco de codigo YAML, e a secao 1 do prompt proibe propor politica' };
+        }
+        return true;
+
+    # --- 4. A tabela de perguntas de verificacao existe de fato ---
+    - type: javascript
+      value: |
+        const bloco = output.split('PERGUNTAS DE VERIFICACAO')[1] || '';
+        const ate = bloco.split('APONTAMENTOS')[0] || '';
+        const linhasTabela = ate.split('\n').filter((l) => (l.match(/\|/g) || []).length >= 3);
+        // cabecalho + separador + ao menos 3 perguntas: o padrao tem 5 regras declaradas
+        return linhasTabela.length >= 5
+          ? true
+          : { pass: false, score: 0, reason: `tabela de verificacao com ${linhasTabela.length} linhas; esperado cabecalho, separador e ao menos 3 perguntas` };
+
+    # --- 5. Limites operacionais ---
+    # Limite de latencia mais generoso que os itens de plantao do Checkpoint 08: este
+    # prompt roda em revisao de merge request, nao com incidente aberto. O numero vem da
+    # medicao registrada no Checkpoint 10.
+    - type: latency
+      threshold: 20000
+    - type: cost
+      threshold: 0.03
+
+tests:
+  # =========================================================================
+  - description: Politica permissiva (allow-all) — tem que BARRAR
+    vars:
+      politica: file://casos/sentinel/politica-permissiva.txt
+    assert:
+      # O veredito e funcao dos apontamentos (secao 6) e aqui existe bloqueador obvio:
+      # `ingress: [- {}]` e `egress: [- {}]` liberam qualquer origem e qualquer destino.
+      - type: javascript
+        value: |
+          const bloco = (output.split('VEREDITO')[1] || '').split('PERGUNTAS DE VERIFICACAO')[0] || '';
+          if (!/BARRADO/.test(bloco)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `veredito nao foi BARRADO para uma politica allow-all; saiu "${bloco.trim().split('\n')[0].slice(0, 80)}"`,
+            };
+          }
+          return true;
+      # Pelo menos um apontamento BLOQUEADOR, e numerado (o gerador responde por numero).
+      - type: contains
+        value: 'BLOQUEADOR'
+      - type: javascript
+        value: |
+          const bloco = (output.split('APONTAMENTOS')[1] || '').split('TRAFEGO INDEVIDO PERMITIDO')[0] || '';
+          return /(^|\n)\s*1[.)]/.test(bloco)
+            ? true
+            : { pass: false, score: 0, reason: 'apontamentos nao estao numerados em sequencia a partir de 1' };
+      # O teste pelo avesso (secao 4) tem que produzir resultado: numa politica que libera
+      # qualquer origem e qualquer destino, "Nenhum identificado" e resposta errada.
+      - type: javascript
+        value: |
+          const bloco = (output.split('TRAFEGO INDEVIDO PERMITIDO')[1] || '').split('LACUNAS DA REVISAO')[0] || '';
+          if (/Nenhum identificado/i.test(bloco)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: 'declarou "Nenhum identificado" numa politica que libera qualquer origem e qualquer destino',
+            };
+          }
+          return bloco.trim().length > 20
+            ? true
+            : { pass: false, score: 0, reason: 'secao de trafego indevido vazia ou sem conteudo util' };
+      # As duas direcoes do allow-all precisam ser apontadas, nao so uma.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          const temIngress = /ingress/.test(t);
+          const temEgress = /egress/.test(t);
+          if (!temIngress || !temEgress) {
+            const falta = [!temIngress && 'ingress', !temEgress && 'egress'].filter(Boolean);
+            return { pass: false, score: 0, reason: `revisao nao menciona ${falta.join(' nem ')}, e as duas direcoes estao allow-all` };
+          }
+          return true;
+
+  # =========================================================================
+  - description: Politica gerada pelo par — veredito coerente com os apontamentos
+    vars:
+      politica: file://casos/sentinel/politica-endurecida.txt
+    assert:
+      # ESTE CASO TINHA OUTRA PREMISSA, E ELA ESTAVA ERRADA.
+      #
+      # A politica aqui foi gerada por `networkpolicy-sentinel` e passou os 15 asserts
+      # semanticos da suite dele no Checkpoint 08. Eu escrevi o caso exigindo que o
+      # revisor NAO barrasse, no raciocinio de que uma politica aprovada pela suite do
+      # gerador nao tem bloqueador a encontrar.
+      #
+      # Os dois providers barraram, e os dois tinham razao:
+      #   - o `podSelector` cobre TODOS os pods do namespace, e nao so `app=sentinel`,
+      #     de modo que as liberacoes de ingress do Sentinel valem para qualquer vizinho
+      #     de namespace;
+      #   - as regras de ingress nao restringem porta, liberando todas as portas dos pods
+      #     alcancados para as origens declaradas.
+      #
+      # O achado real nao e sobre o revisor: e sobre a suite do GERADOR. Ela nunca
+      # verificou que o seletor alveja os pods certos. O par gerador/revisor do
+      # Checkpoint 06 existe justamente para isso, e aqui ele funcionou — o revisor pegou
+      # o que a suite do gerador nao olhava. Virou pendencia da suite de
+      # `networkpolicy-sentinel`, registrada no Checkpoint 10.
+      #
+      # O assert de "nao pode barrar" mudou de caso: foi para `politica-conforme.txt`,
+      # escrita a mao contra as regras do padrao. Aqui sobra o que de fato se pode
+      # exigir sem conhecer o veredito certo de antemao: COERENCIA INTERNA.
+
+      # O veredito e funcao dos apontamentos e nao pode contradize-los (secao 6).
+      - type: javascript
+        value: |
+          const veredito = (output.split('VEREDITO')[1] || '').split('PERGUNTAS DE VERIFICACAO')[0] || '';
+          const apont = (output.split('APONTAMENTOS')[1] || '').split('TRAFEGO INDEVIDO PERMITIDO')[0] || '';
+          const temBloqueador = /BLOQUEADOR/.test(apont);
+          const barrou = /BARRADO/.test(veredito);
+          if (temBloqueador && !barrou) {
+            return { pass: false, score: 0, reason: 'listou apontamento BLOQUEADOR mas nao barrou; o veredito contradiz os apontamentos' };
+          }
+          if (barrou && !temBloqueador) {
+            return { pass: false, score: 0, reason: 'barrou sem listar nenhum apontamento BLOQUEADOR; o veredito contradiz os apontamentos' };
+          }
+          if (!/APROVADO|BARRADO/.test(veredito)) {
+            return { pass: false, score: 0, reason: `veredito nao usa nenhum dos tres valores permitidos; saiu "${veredito.trim().split('\n')[0].slice(0, 80)}"` };
+          }
+          return true;
+      # A politica usa `kubernetes.io/metadata.name` como label de namespace, que NAO
+      # esta no mapa de servicos. A secao 7 do prompt manda tratar isso como apontamento
+      # ou lacuna, e nao completar o contexto por suposicao. Esta e a verificacao de que
+      # o revisor leu o mapa em vez de assumir conhecimento de Kubernetes.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          const citouLabel = /metadata\.name|label.*namespace|namespace.*label/.test(t);
+          return citouLabel
+            ? true
+            : {
+                pass: false,
+                score: 0,
+                reason: 'nao comentou o label de namespace usado pela politica e ausente do mapa de servicos (premissa nao declarada no insumo)',
+              };
+
+  # =========================================================================
+  - description: Politica conforme ao padrao — nao pode BARRAR
+    vars:
+      politica: file://casos/sentinel/politica-conforme.txt
+    assert:
+      # Fixture escrito a mao contra as cinco regras do padrao, e nao gerado por modelo:
+      # negacao padrao em objeto proprio cobrindo o namespace, liberacoes num segundo
+      # objeto restrito a `app=sentinel`, egress por par destino-porta nas portas do mapa,
+      # DNS com UDP e TCP na 53, comentario nomeando o fluxo de cada regra.
+      #
+      # As premissas inevitaveis estao DECLARADAS no cabecalho, incluindo a do label de
+      # namespace e a lacuna da porta de escuta do Sentinel, que o mapa nao informa.
+      #
+      # Por isso o veredito esperado aqui e APROVADO COM RESSALVAS e nao APROVADO puro:
+      # o insumo e genuinamente incompleto, e nenhuma politica consegue zerar ressalva
+      # com o mapa que existe. O que NAO pode acontecer e BARRADO — revisor que barra o
+      # que cumpre o padrao e tao inutil quanto revisor que aprova allow-all, e o custo
+      # dele e o time parar de ler o parecer.
+      - type: javascript
+        value: |
+          const bloco = (output.split('VEREDITO')[1] || '').split('PERGUNTAS DE VERIFICACAO')[0] || '';
+          if (/BARRADO/.test(bloco)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `barrou uma politica que cumpre as cinco regras do padrao; veredito "${bloco.trim().split('\n')[0].slice(0, 120)}"`,
+            };
+          }
+          if (!/APROVADO/.test(bloco)) {
+            return {
+              pass: false,
+              score: 0,
+              reason: `veredito nao e APROVADO nem APROVADO COM RESSALVAS; saiu "${bloco.trim().split('\n')[0].slice(0, 80)}"`,
+            };
+          }
+          return true;
+      # Coerencia: nao barrou, logo nao pode haver BLOQUEADOR listado.
+      - type: javascript
+        value: |
+          const apont = (output.split('APONTAMENTOS')[1] || '').split('TRAFEGO INDEVIDO PERMITIDO')[0] || '';
+          const m = apont.match(/BLOQUEADOR[^\n]{0,160}/);
+          return m
+            ? { pass: false, score: 0, reason: `apontou BLOQUEADOR numa politica conforme: "${m[0].slice(0, 140)}"` }
+            : true;
+      # O default-deny em objeto separado tem que ser reconhecido, e nao lido como
+      # politica vazia ou inutil. Secao 3, categoria INTEGRIDADE DA NEGACAO PADRAO.
+      - type: javascript
+        value: |
+          const t = output.toLowerCase();
+          return /default-deny|nega[cç][aã]o padr[aã]o|sentinel-default-deny/.test(t)
+            ? true
+            : { pass: false, score: 0, reason: 'a revisao nao menciona o objeto de negacao padrao, que e uma das cinco regras do padrao' };

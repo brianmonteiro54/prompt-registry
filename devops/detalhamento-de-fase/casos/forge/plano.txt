@@ -1,0 +1,59 @@
+PREMISSAS HERDADAS DO DIAGNOSTICO
+- Consumo atual de Sentinel, Cerebro e Pepper baseado em lotes fechados horários com garantias de
+  completude e atomicidade.
+- Classificação do Elo 1 de que ingestão e gravação no DW exigem lote completo.
+
+DISCORDANCIAS DO DIAGNOSTICO
+O diagnóstico do Elo 1 classificou a ingestão e a gravação no DW como "EXIGE LOTE COMPLETO" com base
+no fato de que hoje rodam em cron e partição horária. Discordamos dessa classificação: rodar em lote
+hoje é escolha de implementação atual, não propriedade inerente. A ingestão contínua do Relay e a
+escrita incremental em partições são tecnicamente viáveis. O verdadeiro desafio não é o pipeline
+recusar blocos menores, mas sim a garantia de completude exigida pelos consumidores (Sentinel,
+Cerebro e Pepper) que dependem de janelas fechadas. Ajustamos o plano considerando a ingestão
+contínua como meta viável nas primeiras fases.
+
+FASES
+- Fase 1 - Observabilidade e Dupla Gravação Paralela: Objetivo: Estabelecer baseline sem alterar o
+  tráfego produtivo principal. O que muda: Criação de um pipeline paralelo consumindo continuamente
+  do Relay para um destino de teste/sombra. O que permanece: O job em cron e o pipeline original do
+  Forge rodando inalterados. Continuidade por consumidor: 100% idêntica à atual. Critério de avanço:
+  Paridade de dados verificada entre a saída sombra e o batch tradicional por 48 horas contínuas.
+  Ponto de reversão: Desligar o consumer sombra sem impacto algum no produtivo. Depende de lacuna:
+  nenhuma.
+
+- Fase 2 - Ingestão Contínua com Consumidores em Modo Duplo: Objetivo: Migrar a ingestão para o
+  modelo contínuo mantendo compatibilidade para os consumidores legados. O que muda: O Forge passa a
+  consumir continuamente do Relay em pequenos blocos. O que permanece: Geração de visões horárias
+  simuladas para não quebrar a garantia implícita dos consumidores. Continuidade por consumidor:
+  Sentinel, Cerebro e Pepper continuam operando através de adaptadores de janela horária. Critério de
+  avanço: Estabilidade da ingestão contínua por 5 dias sem acumulo de backlog ou picos de latência.
+  Ponto de reversão: Chaveamento rápido de volta para o acionamento em cron do job original
+  (utilizando o backlog do Relay). Depende de lacuna: Granularidade das 14 etapas do Spark.
+
+- Fase 3 - Transição dos Consumidores e Desativação do Legado: Objetivo: Remover o modelo de lote e
+  liberar os consumidores para o consumo direto do fluxo contínuo. O que muda: Atualização de
+  Sentinel, Cerebro e Pepper para consumirem os blocos incrementais. O que permanece: Infraestrutura
+  do Relay e core do Forge modernizado. Continuidade por consumidor: Adaptação final dos contratos de
+  garantia implícita dos consumidores. Critério de avanço: Todos os consumidores migrados sem estouro
+  de SLA de entrega. Ponto de reversão: Reversão restrita ao consumidor que falhar, religando o
+  adaptador de lote para ele. Depende de lacuna: SLA de entrega dos consumidores.
+
+ORDEM E JUSTIFICATIVA
+A ordem prioriza a segurança estrutural exigida pelos requisitos. A Fase 1 foca em criar paridade e
+observabilidade sem tocar na produção, mitigando os riscos silenciosos (como o da Pepper). A Fase 2
+ataca diretamente o requisito principal (consumo contínuo do Relay) mas protege os consumidores
+legados através de visões simuladas. A Fase 3 conclui a virada dos consumidores. Esta sequência evita
+o big-bang e garante pontos de reversão independentes.
+
+FORA DE ESCOPO
+- Redesenho completo da lógica interna das 14 etapas de transformação do Spark além do necessário
+  para aceitar blocos contínuos.
+- Alteração nos contratos de negócio dos relatórios de billing da Pepper.
+
+LACUNAS
+- Granularidade das 14 etapas do Spark: Necessário detalhar o código ou spec para confirmar se alguma
+  transformação interna exige estado global irrecuperável em micro-lotes.
+- SLA de entrega dos consumidores: Necessário confirmar os limites exatos de tolerância a atraso para
+  Sentinel, Cerebro e Pepper.
+- Mecanismo de reprocessamento em lote: Necessário insumo sobre como lidar com reprocessamentos
+  retroativos no modelo orientado a eventos.
