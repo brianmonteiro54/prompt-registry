@@ -51,8 +51,9 @@
  *
  * O que se ganha: elimina a reprovacao de amostra unica pagando repeticao apenas quando
  * algo falha, que e a minoria dos casos.
- * O que se perde: um defeito que aparece em metade das geracoes passa com probabilidade
- * de 1 em 4 em vez de 1 em 2. A sensibilidade cai, e esse e o preco.
+ * O que se perde: sensibilidade. Um defeito que aparece em metade das geracoes so e
+ * barrado quando as DUAS passadas falham, ou seja, e detectado em 1 de 4 vezes (0,5 x
+ * 0,5) e escapa nas outras 3. Com passada unica seria detectado em 1 de 2. E o preco.
  *
  * Alternativa rejeitada 1 — tres geracoes e mediana, sempre. Elimina melhor a flutuacao e
  * triplica o custo de TODA execucao, inclusive das que iam passar de primeira.
@@ -68,7 +69,14 @@ const RAIZ = path.resolve(__dirname, '..');
 const DIR_SAIDA = process.env.PROMPTFOO_OUT_DIR || '/tmp/avaliacao-playbook';
 
 /** Caminhos que, ao mudar, forcam a suite inteira. Ver DECISAO 1. */
-const COMPARTILHADOS = [/^scripts\//, /^package(-lock)?\.json$/, /^\.github\//, /casos\//, /criterios\//];
+const COMPARTILHADOS = [
+  /^scripts\//,
+  /^package(-lock)?\.json$/,
+  /^\.github\//,
+  /^avaliacao\//, // o baseline e o gabarito do gate: mudar ele revalida tudo
+  /casos\//,
+  /criterios\//,
+];
 
 /** Suites que precisam de um script de corte depois da eval (o gate nao cabe no YAML). */
 const CORTE_EXTRA = {

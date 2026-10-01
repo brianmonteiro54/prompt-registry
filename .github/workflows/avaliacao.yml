@@ -47,6 +47,10 @@ on:
       - '.github/workflows/avaliacao.yml'
   push:
     branches: [main]
+    # Mesma lista do pull_request, de proposito. A primeira versao omitia `package.json`,
+    # `package-lock.json` e o proprio workflow aqui, de modo que um merge na `main` que
+    # tocasse so um deles nao disparava o pipeline — justamente os arquivos que o
+    # orquestrador trata como compartilhados e que escalonam para a suite inteira.
     paths:
       - 'devops/**'
       - 'desenvolvimento/**'
@@ -55,6 +59,9 @@ on:
       - 'produtividade/**'
       - 'scripts/**'
       - 'avaliacao/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/avaliacao.yml'
   # Permite forcar a suite inteira a mao, para quando se quer conferir o catalogo sem
   # depender de um PR que toque arquivo compartilhado.
   workflow_dispatch:
